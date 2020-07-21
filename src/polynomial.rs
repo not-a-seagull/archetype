@@ -76,6 +76,16 @@ impl<T: Copy, Axis> Polynomial<T, Axis> {
     pub fn get(&self, i: usize) -> Option<T> {
         self.coefs.iter().copied().nth(i)
     }
+
+    pub fn from_array<const N: usize>(array: [T; N]) -> Self {
+        let mut coefs = SmallVec::with_capacity(N);
+        coefs.extend_from_slice(&array);
+
+        Self {
+            coefs,
+            _phantom: PhantomData,
+        }
+    }
 }
 
 impl<T: Zero + Clone, Axis> Polynomial<T, Axis> {
@@ -216,7 +226,7 @@ fn diamond_test() {
     assert_eq!(res, desired_res);
 }
 
-impl<T: Mul<Output = T> + Copy + std::iter::Product, Axis> Mul for Polynomial<T, Axis> {
+impl<T: Mul<Output = T> + Copy + std::iter::Sum, Axis> Mul for Polynomial<T, Axis> {
     type Output = Self;
 
     #[inline]
@@ -226,19 +236,44 @@ impl<T: Mul<Output = T> + Copy + std::iter::Product, Axis> Mul for Polynomial<T,
                 .into_iter()
                 .map(|coef1| other.coefs.iter().copied().map(move |coef2| coef1 * coef2))
                 .diamondize()
-                .map(|sm| sm.into_iter().product()),
+                .map(|sm| sm.into_iter().sum()),
         )
     }
 }
 
+#[cfg(test)]
+struct TestAxis;
+
+#[cfg(test)]
+impl Axis for TestAxis {
+    fn axis() -> &'static str {
+        "T"
+    }
+}
+
+#[test]
+fn polynomial_add() {
+    let a = Polynomial::<i32, TestAxis>::from_array([1, 2, 3]);
+    let b = Polynomial::<i32, TestAxis>::from_array([1, 1, 1, 1, 1, 1]);
+    let c = Polynomial::<i32, TestAxis>::from_array([2, 3, 4, 1, 1, 1]);
+
+    assert_eq!(a + b, c);
+}
+
+#[test]
+fn polynomial_sub() {
+    let a = Polynomial::<i32, TestAxis>::from_array([1, 2, 3]);
+    let b = Polynomial::<i32, TestAxis>::from_array([1, 1, 1, 1, 1, 1]);
+    let c = Polynomial::<i32, TestAxis>::from_array([0, 1, 2, -1, -1, -1]);
+
+    assert_eq!(a - b, c);
+}
+
 #[test]
 fn polynomial_mult() {
-    struct T;
-    impl Axis for T { fn axis() -> &'static str { "T" } }
-
-    let a = Polynomial::<i32, T>::new(vec![1i32, 2, 1]);
-    let b = Polynomial::<i32, T>::new(vec![3i32, 5, 5, 9]);
-    let c = Polynomial::<i32, T>::new(vec![3i32, 11, 18, 24, 23, 9]);
+    let a = Polynomial::<i32, TestAxis>::new(vec![1i32, 2, 1]);
+    let b = Polynomial::<i32, TestAxis>::new(vec![3i32, 5, 5, 9]);
+    let c = Polynomial::<i32, TestAxis>::new(vec![3i32, 11, 18, 24, 23, 9]);
 
     assert_eq!(a * b, c)
 }
