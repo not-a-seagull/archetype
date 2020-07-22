@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::{collections::HashMap, mem};
 
-const EXPECTED_CURVES: usize = 100;
-
 /// The current graphical state.
 #[derive(Serialize, Deserialize)]
 pub struct GraphicalState {
@@ -36,7 +34,7 @@ fn rasterize_line(
         .for_each(|pt| {
             drawing::draw_filled_ellipse_mut(
                 &mut *c.write(),
-                (width, height),
+                (pt.0, pt.1),
                 line_width,
                 line_width,
                 color,

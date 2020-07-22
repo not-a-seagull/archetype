@@ -14,6 +14,61 @@ pub use brush::*;
 pub use polynomial::*;
 pub use state::*;
 
+use std::{
+    mem,
+    io::{self, prelude::*},
+    thread,
+    time::Duration,
+};
+
+// spawns a quick deadlock detector
+fn deadlock_detector() {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(10));
+
+        let deadlocks = parking_lot::deadlock::check_deadlock();
+        if deadlocks.is_empty() {
+            continue;
+        }
+
+        println!("{} deadlocks detected", deadlocks.len());
+        for (i, threads) in deadlocks.iter().enumerate() {
+            println!("Deadlock #{}", i);
+            for t in threads {
+                println!("Thread Id {:#?}", t.thread_id());
+                println!("{:#?}", t.backtrace());
+            }
+        }
+    });
+}
+
 fn main() {
-    println!("Hello, world!");
+    deadlock_detector();
+
+    let mut width = String::new();
+    let mut height = String::new();
+
+    let mut so = io::stdout();
+    let mut stdout = so.lock();
+    let mut si = io::stdin();
+    let mut stdin = si.lock();
+
+    stdout.write_all(b"Enter the width of the project: ").unwrap();
+    stdout.flush().unwrap();
+    stdin.read_line(&mut width).expect("Unable to get width");
+    stdout.write_all(b"Enter the height of the project: ").unwrap();
+    stdout.flush().unwrap();
+    stdin.read_line(&mut height).expect("Unable to get height");
+  
+    mem::drop(stdin);
+    mem::drop(stdout);
+
+    width.pop();
+    height.pop();
+
+    let width = width.parse::<u32>().expect("Width is not a number");
+    let height = height.parse::<u32>().expect("Height is not a number");
+
+    let gui = gui::Gui::new_project(width, height);
+    gui.run();
 }
