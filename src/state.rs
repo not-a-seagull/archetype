@@ -29,6 +29,7 @@ fn rasterize_line(
 ) {
     let line_iter =
         BresenhamLineIter::new((line.from_x(), line.from_y()), (line.to_x(), line.to_y()));
+
     line_iter
         .filter(|(x, y)| *x >= 0 && *x < width && *y >= 0 && *y < height)
         .for_each(|pt| {

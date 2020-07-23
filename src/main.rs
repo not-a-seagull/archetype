@@ -15,9 +15,8 @@ pub use polynomial::*;
 pub use state::*;
 
 use std::{
-    mem,
     io::{self, prelude::*},
-    thread,
+    mem, thread,
     time::Duration,
 };
 
@@ -53,13 +52,17 @@ fn main() {
     let mut si = io::stdin();
     let mut stdin = si.lock();
 
-    stdout.write_all(b"Enter the width of the project: ").unwrap();
+    stdout
+        .write_all(b"Enter the width of the project: ")
+        .unwrap();
     stdout.flush().unwrap();
     stdin.read_line(&mut width).expect("Unable to get width");
-    stdout.write_all(b"Enter the height of the project: ").unwrap();
+    stdout
+        .write_all(b"Enter the height of the project: ")
+        .unwrap();
     stdout.flush().unwrap();
     stdin.read_line(&mut height).expect("Unable to get height");
-  
+
     mem::drop(stdin);
     mem::drop(stdout);
 
