@@ -11,6 +11,7 @@ mod state;
 
 pub use bezier::*;
 pub use brush::*;
+pub use gui::*;
 pub use polynomial::*;
 pub use state::*;
 

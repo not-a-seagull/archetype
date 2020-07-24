@@ -1,7 +1,8 @@
 // GPL v3.0
 
-use super::GraphicalState;
+use super::{colors, Brush, GraphicalState};
 use cairo::{Context, Format, ImageSurface};
+use euclid::default::Point2D;
 use gio::prelude::*;
 use glib::Bytes;
 use gtk::{prelude::*, Application, DrawingArea, Image as GtkImage};
@@ -10,7 +11,9 @@ use parking_lot::{
     MappedMutexGuard, MappedRwLockReadGuard, Mutex, MutexGuard, RwLock, RwLockReadGuard,
     RwLockUpgradableReadGuard, RwLockWriteGuard,
 };
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::{env, mem, sync::Arc};
 
 mod ui;
@@ -18,13 +21,49 @@ mod ui;
 pub const DEFAULT_WIDTH: u32 = 300;
 pub const DEFAULT_HEIGHT: u32 = 200;
 
+#[inline]
+fn standard_brushes() -> SmallVec<[Brush; 10]> {
+    let mut sm = SmallVec::new();
+    sm.push(Brush::new(colors::BLACK, 10));
+    sm
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Project {
     // the graphical frames contained within
     width: u32,
     height: u32,
+    brushes: SmallVec<[Brush; 10]>,
     frames: Vec<GraphicalState>,
     current_frame: usize,
+    current_brush: usize,
+}
+
+impl Project {
+    #[inline]
+    pub fn current_frame(&self) -> &GraphicalState {
+        &self.frames[self.current_frame]
+    }
+
+    #[inline]
+    pub fn current_frame_mut(&mut self) -> &mut GraphicalState {
+        &mut self.frames[self.current_frame]
+    }
+
+    #[inline]
+    pub fn brush(&self, index: usize) -> Option<&Brush> {
+        self.brushes.get(index)
+    }
+
+    #[inline]
+    pub fn current_brush(&self) -> &Brush {
+        &self.brushes[self.current_brush]
+    }
+
+    #[inline]
+    pub fn current_brush_index(&self) -> usize {
+        self.current_brush
+    }
 }
 
 struct GuiInternal {
@@ -33,6 +72,9 @@ struct GuiInternal {
     application: Application,
     canvas: RwLock<Option<DrawingArea>>,
     surface: Mutex<Option<ImageSurface>>,
+
+    // the current drag starting point
+    drag_line: RwLock<Option<(Point2D<f32>, Point2D<f32>)>>,
 }
 
 #[derive(Clone)]
@@ -45,24 +87,20 @@ impl Gui {
     pub fn new(project: Project) -> Gui {
         let application = Application::new(Some("com.notaseagull.archetype"), Default::default())
             .expect("Unable to initialize GTK");
-        let img = RgbaImage::from_fn(project.width, project.height, |x, y| {
-            let r = (x as f32 / project.width as f32) * std::u8::MAX as f32;
-            let g = (y as f32 / project.height as f32) * std::u8::MAX as f32;
-            let b = 200;
-            let a = std::u8::MAX;
-            Rgba([r as u8, g as u8, b, a])
-        });
+        let img = RgbaImage::from_pixel(project.width, project.height, Rgba([255, 255, 255, 0]));
         let mut gui = Self(Arc::new(GuiInternal {
             current_project: RwLock::new(project),
             application,
             canvas: RwLock::new(None),
             image: RwLock::new((img, true)),
             surface: Mutex::new(None),
+            drag_line: RwLock::new(None),
         }));
 
         let cl = gui.clone();
         gui.0.application.connect_activate(move |app| {
             ui::build_ui(app, cl.clone());
+            cl.update_image();
         });
 
         gui
@@ -73,9 +111,45 @@ impl Gui {
             width,
             height,
             frames: vec![GraphicalState::new()],
+            brushes: standard_brushes(),
             current_frame: 0,
+            current_brush: 0,
         };
         Self::new(project)
+    }
+
+    #[inline]
+    pub fn update_image(&self) {
+        // wipe the image
+        self.0
+            .image
+            .write()
+            .0
+            .as_flat_samples_mut()
+            .image_mut_slice()
+            .unwrap()
+            .par_iter_mut()
+            .for_each(|m| *m = 0);
+
+        let pr = self.0.current_project.read();
+        let frame = &pr.frames[pr.current_frame];
+        frame.rasterize(&self.0.image, &self.0.current_project);
+        self.0
+            .canvas
+            .read()
+            .as_ref()
+            .expect("Canvas does not yet exist")
+            .queue_draw();
+    }
+
+    #[inline]
+    pub fn drag_line(&self) -> &RwLock<Option<(Point2D<f32>, Point2D<f32>)>> {
+        &self.0.drag_line
+    }
+
+    #[inline]
+    pub fn project(&self) -> &RwLock<Project> {
+        &self.0.current_project
     }
 
     #[inline]
@@ -108,12 +182,6 @@ impl Gui {
     pub fn dimensions(&self) -> (u32, u32) {
         let pr = self.0.current_project.read();
         (pr.width, pr.height)
-    }
-
-    #[inline]
-    pub fn update_image(&self) {
-        let mut img = self.0.image.write(); // acquire write lock
-        img.1 = true;
     }
 
     // rebuild the surface
@@ -173,7 +241,7 @@ impl Gui {
                 img.0.enumerate_rows().fold(&mut *data, |data, (y, row)| {
                     row.for_each(|(x, _y, pixel)| {
                         let pixel: [u8; 4] = match pixel.0 {
-                            //                            [_, _, _, 0] => [219, 252, 255, 255],
+                            [_, _, _, 0] => [219, 252, 255, 255],
                             [r, g, b, a] => [b, g, r, a],
                         };
 
@@ -198,8 +266,17 @@ impl Gui {
                 mem::drop(img);
             }
 
-            context.set_source_surface(&*surface, width as f64, height as f64);
+            context.set_source_surface(&*surface, 0.0 as f64, 0.0 as f64);
             context.paint();
+
+            // draw a red line on top of it if we need to
+            let drag_line = self.0.drag_line.read();
+            if let Some(ref drag_line) = &*drag_line {
+                context.set_source_rgb(1.0, 0.0, 0.0);
+                context.set_line_width(100.0);
+                context.move_to((drag_line.0).x.into(), (drag_line.0).y.into());
+                context.line_to((drag_line.1).x.into(), (drag_line.1).y.into());
+            }
         }
     }
 }

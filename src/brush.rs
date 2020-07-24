@@ -49,6 +49,15 @@ impl Color {
     }
 
     #[inline]
+    pub const unsafe fn new_unchecked(r: f32, g: f32, b: f32) -> Self {
+        Self {
+            r: NotNan::unchecked_new(r),
+            g: NotNan::unchecked_new(g),
+            b: NotNan::unchecked_new(b),
+        }
+    }
+
+    #[inline]
     pub fn r(&self) -> f32 {
         self.r.into_inner()
     }
@@ -64,8 +73,16 @@ impl Color {
     }
 }
 
+pub mod colors {
+    use super::Color;
+
+    pub const BLACK: Color = unsafe { Color::new_unchecked(0.0, 0.0, 0.0) };
+    pub const WHITE: Color = unsafe { Color::new_unchecked(1.0, 1.0, 1.0) };
+    pub const RED: Color = unsafe { Color::new_unchecked(1.0, 0.0, 0.0) };
+}
+
 /// A brush.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct Brush {
     color: Color,
     width: u32,

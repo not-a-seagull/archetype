@@ -13,7 +13,7 @@ struct BezierDeser {
 }
 
 /// A bezier curve.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct BezierCurve {
     points: SmallVec<[Vector2F; 4]>,

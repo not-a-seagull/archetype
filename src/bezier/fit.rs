@@ -5,7 +5,7 @@ use nalgebra::{Matrix2, Vector2};
 use pathfinder_geometry::vector::{vec2f, Vector2F};
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec};
-use std::boxed::Box;
+use std::{boxed::Box, iter};
 
 // adapted from http://webdocs.cs.ualberta.ca/~graphics/books/GraphicsGems/gems/FitCurves.c
 
@@ -211,7 +211,7 @@ fn newton_raphson_root_find(curve: &BezierCurve, point: Vector2F, u: f32) -> f32
 #[inline]
 fn chord_length_parameterize(points: &[Vector2F]) -> Box<[f32]> {
     let mut chord_length: SmallVec<[f32; 12]> = SmallVec::with_capacity(points.len());
-    chord_length.push(0.0);
+    chord_length.extend(iter::repeat(0.0f32).take(points.len()));
     for i in 1..points.len() {
         chord_length[i] = chord_length[i - 1] + distance(points[i], points[i - 1]);
     }
