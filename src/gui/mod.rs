@@ -24,7 +24,7 @@ pub const DEFAULT_HEIGHT: u32 = 200;
 #[inline]
 fn standard_brushes() -> SmallVec<[Brush; 10]> {
     let mut sm = SmallVec::new();
-    sm.push(Brush::new(colors::BLACK, 10));
+    sm.push(Brush::new(colors::BLACK, 2));
     sm
 }
 

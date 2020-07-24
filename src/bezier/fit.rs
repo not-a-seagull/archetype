@@ -12,8 +12,10 @@ use std::{boxed::Box, iter};
 /// Fit a set of points to a curve.
 #[inline]
 pub fn fit_curve(points: &[Vector2F], error: f32) -> Vec<BezierCurve> {
+    println!("Calculating points: {:?}", points);
     let lt = compute_left_tangent(points, 0);
     let rt = compute_right_tangent(points, points.len() - 1);
+    println!("lt: {:?}, rt: {:?}", &lt, &rt);
     fit_cubic(points, lt, rt, error)
 }
 
@@ -25,8 +27,8 @@ fn fit_cubic(points: &[Vector2F], lt: Vector2F, rt: Vector2F, error: f32) -> Vec
         return vec![BezierCurve::from_points([
             points[0],
             points[0] + (lt * dist),
-            points[3] + (rt * dist),
-            points[3],
+            points[1] + (rt * dist),
+            points[1],
         ])];
     }
 
@@ -126,6 +128,8 @@ fn generate_bezier(
         data
     };
 
+    println!("C-Matrix: {:?}", &c_mtrx);
+
     // calculate determinants
     // TODO: I'm copying the C math here, there's a better way of doing this
     let mut det_c0_c1 = c_mtrx.determinant();
@@ -140,6 +144,8 @@ fn generate_bezier(
     // compute alpha values
     let alpha_l = det_x_c1 / det_c0_c1;
     let alpha_r = det_c0_x / det_c0_c1;
+
+    println!("Alpha_l: {:?}, Alpha_r: {:?}", &alpha_l, &alpha_r);
 
     // if the alphas are negative, use the We/Barsky heuristic
     if alpha_l < 10e-6 || alpha_r < 10e-6 {
