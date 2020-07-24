@@ -2,6 +2,7 @@
 
 use super::BezierCurve;
 use nalgebra::{Matrix2, Vector2};
+use ordered_float::NotNan;
 use pathfinder_geometry::vector::{vec2f, Vector2F};
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec};
@@ -12,14 +13,17 @@ use std::{boxed::Box, iter};
 /// Fit a set of points to a curve.
 #[inline]
 pub fn fit_curve(points: &[Vector2F], error: f32) -> Vec<BezierCurve> {
-    println!("Calculating points: {:?}", points);
-    let lt = compute_left_tangent(points, 0);
-    let rt = compute_right_tangent(points, points.len() - 1);
+    let lt = compute_left_tangent(points);
+    let rt = compute_right_tangent(points);
     println!("lt: {:?}, rt: {:?}", &lt, &rt);
     fit_cubic(points, lt, rt, error)
 }
 
 fn fit_cubic(points: &[Vector2F], lt: Vector2F, rt: Vector2F, error: f32) -> Vec<BezierCurve> {
+    if points.len() < 2 {
+        panic!("Unexpected number of points");
+    }
+
     // if there are only two points, take the shortcut
     if points.len() == 2 {
         let dist = distance(points[1], points[0]) / 3.0f32;
@@ -37,8 +41,8 @@ fn fit_cubic(points: &[Vector2F], lt: Vector2F, rt: Vector2F, error: f32) -> Vec
     let mut curve = generate_bezier(points, &u, lt, rt);
 
     // find deviation of points from curve
-    let mut midpoint = 0;
-    let mut max_error = compute_max_error(points, &curve, &u, &mut midpoint);
+    let (max_error, midpoint) = compute_max_error(points, &curve, &u);
+    let mut mp = midpoint;
     if max_error < error {
         // we have a good enough curve, return
         return vec![curve];
@@ -47,10 +51,12 @@ fn fit_cubic(points: &[Vector2F], lt: Vector2F, rt: Vector2F, error: f32) -> Vec
     // try reparameterizing if it's worth it and see if that gives us a better curve
     const MAX_ITERATIONS: usize = 4;
     if max_error < (error * error) {
-        for i in 0..MAX_ITERATIONS {
+        for _i in 0..MAX_ITERATIONS {
+            println!("Iteration #{}", _i);
             let u_prime = reparameterize(points, &u, &curve);
             curve = generate_bezier(points, &u_prime, lt, rt);
-            max_error = compute_max_error(points, &curve, &u_prime, &mut midpoint);
+            let (max_error, midpoint) = compute_max_error(points, &curve, &u_prime);
+            mp = midpoint;
 
             if max_error < error {
                 return vec![curve];
@@ -59,12 +65,12 @@ fn fit_cubic(points: &[Vector2F], lt: Vector2F, rt: Vector2F, error: f32) -> Vec
     }
 
     // split at point and fit recursively
-    let mut ct = compute_center_tangent(points, midpoint);
+    let mut ct = compute_center_tangent(points, mp);
 
     // take advantage of parallel iteration
     let data_set = [
-        (lt, ct, &points[0..midpoint - 1]),
-        (ct * -1.0, rt, &points[midpoint..points.len() - 1]),
+        (lt, ct, &points[0..mp]),
+        (ct * -1.0, rt, &points[mp..points.len() - 1]),
     ];
     data_set
         .par_iter()
@@ -96,35 +102,33 @@ fn generate_bezier(
 
     // create the C and X matrix
     let c_mtrx = {
-        let mut data: Matrix2<f32> =
-            rhs.iter()
-                .fold(Matrix2::from_element(0.0), |mut mtrx, rhs| {
-                    mtrx[(0, 0)] += rhs[0].dot(rhs[0]);
-                    mtrx[(0, 1)] += rhs[0].dot(rhs[1]);
-                    mtrx[(1, 1)] += rhs[1].dot(rhs[1]);
-                    mtrx
-                });
+        let mut data: [[f32; 2]; 2] = rhs.iter().fold([[0.0, 0.0], [0.0, 0.0]], |mut mtrx, rhs| {
+            mtrx[0][1] += rhs[0].dot(rhs[0]);
+            mtrx[0][1] += rhs[0].dot(rhs[1]);
+            mtrx[1][1] += rhs[1].dot(rhs[1]);
+            mtrx
+        });
 
-        data[(1, 0)] = data[(0, 1)];
+        data[1][0] = data[0][1];
         data
     };
 
-    let li = points.len() - 1;
+    let last_point = points[points.len() - 1];
     let x_mtrx = {
-        let data: Vector2<f32> =
-            rhs.iter()
-                .enumerate()
-                .fold(Vector2::from_element(0.0), |mut vctr, (i, rhs)| {
-                    let u = u_prime[i];
-                    let tmp = points[i]
-                        - ((points[0] * b0(u))
-                            + (points[0] * b1(u))
-                            + (points[li] * b2(u))
-                            + (points[li] * b3(u)));
-                    vctr[0] += rhs[0].dot(tmp);
-                    vctr[1] += rhs[1].dot(tmp);
-                    vctr
-                });
+        let data: [f32; 2] = rhs
+            .iter()
+            .zip(u_prime.iter().copied())
+            .zip(points.iter().copied())
+            .fold([0.0, 0.0], |mut vctr, ((rhs, u), point)| {
+                let tmp = point
+                    - ((points[0] * b0(u))
+                        + (points[0] * b1(u))
+                        + (last_point * b2(u))
+                        + (last_point * b3(u)));
+                vctr[0] += rhs[0].dot(tmp);
+                vctr[1] += rhs[1].dot(tmp);
+                vctr
+            });
         data
     };
 
@@ -132,36 +136,39 @@ fn generate_bezier(
 
     // calculate determinants
     // TODO: I'm copying the C math here, there's a better way of doing this
-    let mut det_c0_c1 = c_mtrx.determinant();
-    let det_c0_x = (c_mtrx[(0, 0)] * x_mtrx[1]) - (c_mtrx[(0, 1)] * x_mtrx[0]);
-    let det_x_c1 = (x_mtrx[0] * c_mtrx[(1, 1)]) - (x_mtrx[1] * c_mtrx[(0, 1)]);
-
-    // prevent divide-by-zero panic
-    if det_c0_c1 == 0.0 {
-        det_c0_c1 = (c_mtrx[(0, 0)] * c_mtrx[(1, 1)]) * EPSILON;
-    }
+    let det_c0_c1 = (c_mtrx[0][0] * c_mtrx[1][1]) - (c_mtrx[1][0] * c_mtrx[0][1]);
+    let det_c0_x = (c_mtrx[0][0] * x_mtrx[1]) - (c_mtrx[1][0] * x_mtrx[0]);
+    let det_x_c1 = (x_mtrx[0] * c_mtrx[1][1]) - (x_mtrx[1] * c_mtrx[0][1]);
 
     // compute alpha values
-    let alpha_l = det_x_c1 / det_c0_c1;
-    let alpha_r = det_c0_x / det_c0_c1;
+    let alpha_l = if det_c0_c1.abs() < 1.0e-4 {
+        0.0
+    } else {
+        det_x_c1 / det_c0_c1
+    };
+    let alpha_r = if det_c0_c1.abs() < 1.0e-4 {
+        0.0
+    } else {
+        det_c0_x / det_c0_c1
+    };
 
     println!("Alpha_l: {:?}, Alpha_r: {:?}", &alpha_l, &alpha_r);
 
     // if the alphas are negative, use the We/Barsky heuristic
     if alpha_l < 10e-6 || alpha_r < 10e-6 {
-        let dist = distance(points[0], points[li]) / 3.0f32;
+        let dist = distance(points[0], last_point) / 3.0f32; 
         BezierCurve::from_points([
             points[0],
             points[0] + (lt * dist),
-            points[li] + (rt * dist),
-            points[li],
+            last_point + (rt * dist),
+            last_point,
         ])
     } else {
         BezierCurve::from_points([
             points[0],
             points[0] + (lt * alpha_l),
-            points[li] + (rt * alpha_r),
-            points[li],
+            last_point + (rt * alpha_r),
+            last_point,
         ])
     }
 }
@@ -172,8 +179,8 @@ fn reparameterize(points: &[Vector2F], u: &[f32], curve: &BezierCurve) -> Box<[f
     points
         .par_iter()
         .copied()
-        .enumerate()
-        .map(|(i, pt)| newton_raphson_root_find(curve, pt, u[i]))
+        .zip(u.par_iter().copied())
+        .map(|(pt, u)| newton_raphson_root_find(curve, pt, u))
         .collect::<Vec<f32>>()
         .into_boxed_slice()
 }
@@ -182,90 +189,80 @@ fn reparameterize(points: &[Vector2F], u: &[f32], curve: &BezierCurve) -> Box<[f
 #[inline]
 fn newton_raphson_root_find(curve: &BezierCurve, point: Vector2F, u: f32) -> f32 {
     // compute Q(u)
-    let q_of_u = curve.eval(u);
+    let qt = curve.eval(u);
 
-    // generate Q'
-    // TODO: make this a functional algorithm
-    let mut data = SmallVec::<[Vector2F; 3]>::new();
-    for i in 0..=2 {
-        data.push((curve.point_at(i + 1) - curve.point_at(i)) * 3.0f32);
+    let [start, cp1, cp2, end] = curve.points();
+    let qn1 = (*cp1 - *start) * 3.0;
+    let qn2 = (*cp2 - *cp1) * 3.0;
+    let qn3 = (*end - *cp2) * 3.0;
+
+    let qnn1 = (qn2 - qn1) * 2.0;
+    let qnn2 = (qn3 - qn2) * 2.0;
+
+    let qnt = de_casteljau3(u, qn1, qn2, qn3);
+    let qnnt = de_casteljau2(u, qnn1, qnn2);
+
+    let numerator = (qt - point).dot(qnt);
+    let denominator = qnt.dot(qnt) + (qt - point).dot(qnnt);
+
+    if denominator == 0.0 {
+        u
+    } else {
+        u - (numerator / denominator)
     }
-    let q_1 = BezierCurve::new(data);
-
-    // generate Q''
-    let mut data = SmallVec::<[Vector2F; 2]>::new();
-    for i in 0..=1 {
-        data.push((curve.point_at(i + 1) - curve.point_at(i)) * 2.0f32);
-    }
-    let q_2 = BezierCurve::new(data);
-
-    let q_1_of_u = q_1.eval(u);
-    let q_2_of_u = q_2.eval(u);
-
-    // compute f(u)/f'(u)
-    let numerator =
-        ((q_of_u.x() - point.x()) * q_1_of_u.x()) + ((q_of_u.y() - point.y()) * q_1_of_u.y());
-    let denominator = (q_1_of_u.x().powi(2))
-        + (q_1_of_u.y().powi(2))
-        + ((q_of_u.x() - point.x()) * q_2_of_u.x())
-        + ((q_of_u.y() - point.y()) * q_2_of_u.y());
-
-    u - (numerator / denominator)
 }
 
 // assign parameter values to points
 #[inline]
 fn chord_length_parameterize(points: &[Vector2F]) -> Box<[f32]> {
     let mut chord_length: SmallVec<[f32; 12]> = SmallVec::with_capacity(points.len());
+    let mut total_distance = 0.0f32;
     chord_length.extend(iter::repeat(0.0f32).take(points.len()));
-    for i in 1..points.len() {
-        chord_length[i] = chord_length[i - 1] + distance(points[i], points[i - 1]);
-    }
 
     for i in 1..points.len() {
-        chord_length[i] = chord_length[i] / chord_length[points.len() - 1];
+        total_distance += distance(points[i - 1], points[i]);
+        chord_length.push(total_distance);
     }
 
-    chord_length.into_vec().into_boxed_slice()
+    chord_length
+        .into_iter()
+        .map(|d| d / total_distance)
+        .collect::<Vec<f32>>()
+        .into_boxed_slice()
 }
 
 // compute the error
 #[inline]
-fn compute_max_error(
-    points: &[Vector2F],
-    curve: &BezierCurve,
-    u: &[f32],
-    midpoint: &mut usize,
-) -> f32 {
-    *midpoint = points.len() / 2;
-
+fn compute_max_error(points: &[Vector2F], curve: &BezierCurve, u: &[f32]) -> (f32, usize) {
     points
-        .iter()
+        .par_iter()
         .copied()
         .enumerate()
-        .fold(0.0f32, |max_dist, (i, pt)| {
-            let p = curve.eval(u[i]);
-            let v = p - pt;
+        .zip(u.par_iter().copied())
+        .map(|((i, pt), u_t)| {
+            let p = curve.eval(u_t);
+            let v = pt - p;
             let dist = v.square_length();
 
-            if dist > max_dist {
-                *midpoint = i;
-                dist
-            } else {
-                max_dist
-            }
+            (dist, i)
         })
+        .max_by(|(dist1, i1), (dist2, i2)| {
+            NotNan::new(*dist1)
+                .unwrap()
+                .cmp(&NotNan::new(*dist2).unwrap())
+        })
+        .unwrap()
 }
 
 /// Compute the left tangent from points.
 #[inline]
-fn compute_left_tangent(points: &[Vector2F], end: usize) -> Vector2F {
-    (points[end + 1] - points[end]).normalize()
+fn compute_left_tangent(points: &[Vector2F]) -> Vector2F {
+    (points[1] - points[0]).normalize()
 }
 
 #[inline]
-fn compute_right_tangent(points: &[Vector2F], end: usize) -> Vector2F {
-    (points[end - 1] - points[end]).normalize()
+fn compute_right_tangent(points: &[Vector2F]) -> Vector2F {
+    (points[points.len() - 2] - points[points.len() - 1]).normalize()
 }
 
 #[inline]
@@ -278,9 +275,7 @@ fn compute_center_tangent(points: &[Vector2F], center: usize) -> Vector2F {
 // distance between vectors
 #[inline]
 fn distance(p1: Vector2F, p2: Vector2F) -> f32 {
-    let a = (p2.x() - p1.x()).powi(2);
-    let b = (p2.y() - p1.y()).powi(2);
-    (a + b).sqrt()
+    (p1.dot(p2)).sqrt()
 }
 
 // bezier multipliers
@@ -305,4 +300,25 @@ fn b2(u: f32) -> f32 {
 #[inline]
 fn b3(u: f32) -> f32 {
     u * u * u
+}
+
+#[inline]
+fn de_casteljau2(u: f32, pt1: Vector2F, pt2: Vector2F) -> Vector2F {
+    (pt1 * (1.0 - u)) * (pt2 * u)
+}
+
+#[inline]
+fn de_casteljau3(u: f32, pt1: Vector2F, pt2: Vector2F, pt3: Vector2F) -> Vector2F {
+    let p1 = (pt1 * (1.0 - u)) + (pt2 * u);
+    let p2 = (pt2 * (1.0 - u)) + (pt3 * u);
+    de_casteljau2(u, p1, p2)
+}
+
+#[inline]
+pub fn de_casteljau4(u: f32, pt1: Vector2F, pt2: Vector2F, pt3: Vector2F, pt4: Vector2F) -> Vector2F {
+    let p1 = (pt1 * (1.0 - u)) + (pt2 * u);
+    let p2 = (pt2 * (1.0 - u)) + (pt3 * u);
+    let p3 = (pt3 * (1.0 - u)) + (pt4 * u);
+
+    de_casteljau3(u, p1, p2, p3)
 }

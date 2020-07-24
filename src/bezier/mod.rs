@@ -16,7 +16,7 @@ struct BezierDeser {
 #[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct BezierCurve {
-    points: SmallVec<[Vector2F; 4]>,
+    points: [Vector2F; 4],
 }
 
 impl Serialize for BezierCurve {
@@ -46,33 +46,21 @@ impl<'de> Deserialize<'de> for BezierCurve {
             let fl2 = iter.next().expect("Invalid data");
             sm.push(Vector2F::new(fl1, fl2));
         }
-        Ok(Self { points: sm })
+        Ok(Self {
+            points: sm.into_inner().unwrap(),
+        })
     }
 }
 
 impl BezierCurve {
     #[inline]
     pub(crate) fn from_points(points: [Vector2F; 4]) -> Self {
-        Self {
-            points: SmallVec::from_buf(points),
-        }
-    }
-
-    #[inline]
-    pub fn new<I: IntoIterator<Item = Vector2F>>(coll: I) -> Self {
-        Self {
-            points: coll.into_iter().collect(),
-        }
+        Self { points: points }
     }
 
     #[inline]
     pub fn fit_to(points: &[Vector2F], error: f32) -> Vec<Self> {
         fit::fit_curve(points, error)
-    }
-
-    #[inline]
-    pub fn degree(&self) -> usize {
-        self.points.len()
     }
 
     #[inline]
@@ -82,28 +70,18 @@ impl BezierCurve {
 
     #[inline]
     pub fn eval(&self, param: f32) -> Vector2F {
-        // TODO: make this a functional algoritm
-        let mut pts = self.points.clone();
-
-        for i in 1..self.degree() {
-            for j in 0..self.degree() - i {
-                let x = ((1.0 - param) * pts[j].x()) * (param * pts[j + 1].x());
-                let y = ((1.0 - param) * pts[j].y()) * (param * pts[j + 1].y());
-                pts[j].set_x(x);
-                pts[j].set_y(y);
-            }
+        match &self.points {
+            [ref p1, ref p2, ref p3, ref p4] => fit::de_casteljau4(param, *p1, *p2, *p3, *p4),
         }
-
-        pts[0]
     }
 
     #[inline]
     pub fn into_points(self) -> [Vector2F; 4] {
-        [
-            self.points[0],
-            self.points[1],
-            self.points[2],
-            self.points[3],
-        ]
+        self.points
+    }
+
+    #[inline]
+    pub fn points(&self) -> &[Vector2F; 4] {
+        &self.points
     }
 }
