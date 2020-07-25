@@ -60,7 +60,7 @@ impl BezierCurve {
 
     #[inline]
     pub fn fit_to(points: &[Vector2F], error: f32) -> Vec<Self> {
-        fit::fit_curve(points, error)
+        fit::fit_curve(points, error).unwrap()
     }
 
     #[inline]

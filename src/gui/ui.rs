@@ -106,9 +106,22 @@ pub fn build_ui(application: &Application, gui: Gui) {
             Some('b') => {
                 let mut pr = gc.project().write();
                 let brush = pr.current_brush_index();
-                pr.current_frame_mut().bezierify_buffered_lines(brush);
+                pr.current_frame_mut().bezierify_buffered_lines(brush, *gc.error().lock());
                 mem::drop(pr);
                 gc.update_image();
+            }
+            Some('e') => {
+                let e = gc.error();
+                let mut error = e.lock();
+                *error += 1.0;
+                println!("Error is {}", *error);
+            }
+            Some('r') => {
+                let e = gc.error();
+                let mut error = e.lock();
+                *error -= 1.0;
+                if *error < 0.0f32 { *error = 0.1f32; }
+                println!("Error is {}", *error);
             }
             _ => (),
         }

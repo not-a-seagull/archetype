@@ -65,7 +65,6 @@ impl GraphicalState {
     pub fn new() -> Self {
         Self {
             curves: Vec::new(),
-            //            buffered_lines: Vec::new(),
             buffered_lines: Vec::new(),
             lines: Vec::new(),
         }
@@ -82,20 +81,20 @@ impl GraphicalState {
     }
 
     /// Convert the buffered items into a bezier curve.
-    pub fn bezierify_buffered_lines(&mut self, brush: usize) {
+    pub fn bezierify_buffered_lines(&mut self, brush: usize, error: f32) {
         let pts: Vec<Vector2F> = self
             .buffered_lines
             .drain(..)
             .flat_map(|l| l.iter().copied().collect::<Vec<Point2D<f32>>>().into_iter())
             .map(|pt| Vector2F::new(pt.x, pt.y))
-            .sorted_by(|pt1, pt2| {
-                NotNan::new(pt1.length())
-                    .unwrap()
-                    .cmp(&NotNan::new(pt2.length()).unwrap())
-            })
+            //.sorted_by(|pt1, pt2| {
+            //    NotNan::new(pt1.length())
+            //        .unwrap()
+            //        .cmp(&NotNan::new(pt2.length()).unwrap())
+            //})
             .collect();
         self.curves.extend(
-            BezierCurve::fit_to(&pts, 2.0)
+            BezierCurve::fit_to(&pts, error)
                 .into_iter()
                 .map(|v| (v, brush)),
         );
@@ -163,7 +162,15 @@ impl GraphicalState {
                 std::u8::MAX,
             ]);
 
-            let [start, control_a, control_b, end] = curve.clone().into_points();
+            let [start, control_a, control_b, end] = curve.clone().into_points(); 
+            /*drawing::draw_cubic_bezier_curve_mut(
+                &mut img.0,
+                (start.x(), start.y()),
+                (end.x(), end.y()),
+                (control_a.x(), control_a.y()),
+                (control_b.x(), control_b.y()),
+                color,
+            );*/
 
             // most of this is shamelessly stolen from imageproc's code, which does
             // the curve but doesn't allow us to set the width of the line

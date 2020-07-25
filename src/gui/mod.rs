@@ -75,6 +75,8 @@ struct GuiInternal {
 
     // the current drag starting point
     drag_line: RwLock<Option<(Point2D<f32>, Point2D<f32>)>>,
+    // error for bezier curve calculation
+    error: Mutex<f32>,
 }
 
 #[derive(Clone)]
@@ -82,6 +84,7 @@ struct GuiInternal {
 pub struct Gui(Arc<GuiInternal>);
 
 const BYTES_PER_PIXEL: i32 = 4;
+const DEFAULT_ERROR: f32 = 32.0;
 
 impl Gui {
     pub fn new(project: Project) -> Gui {
@@ -95,6 +98,7 @@ impl Gui {
             image: RwLock::new((img, true)),
             surface: Mutex::new(None),
             drag_line: RwLock::new(None),
+            error: Mutex::new(DEFAULT_ERROR),
         }));
 
         let cl = gui.clone();
@@ -106,6 +110,7 @@ impl Gui {
         gui
     }
 
+    #[inline]
     pub fn new_project(width: u32, height: u32) -> Gui {
         let project = Project {
             width,
@@ -117,6 +122,9 @@ impl Gui {
         };
         Self::new(project)
     }
+
+    #[inline]
+    pub fn error(&self) -> &Mutex<f32> { &self.0.error }
 
     #[inline]
     pub fn update_image(&self) {
