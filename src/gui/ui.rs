@@ -1,6 +1,6 @@
 // GPL v3.0
 
-use super::{Gui, DEFAULT_HEIGHT, DEFAULT_WIDTH};
+use super::{Gui, GuiMode, DEFAULT_HEIGHT, DEFAULT_WIDTH};
 use euclid::point2;
 use gio::{prelude::*, subclass::prelude::*};
 use glib::{
@@ -12,6 +12,8 @@ use gtk::{
     DrawingArea, DrawingAreaBuilder, Fixed, Image as GtkImage, Inhibit, Orientation, Widget,
 };
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use pathfinder_geometry::vector::Vector2F;
+
 use std::mem;
 
 pub fn build_ui(application: &Application, gui: Gui) {
@@ -39,19 +41,14 @@ pub fn build_ui(application: &Application, gui: Gui) {
     let dr = gui.drawing_area();
     let g2 = gui.clone();
     window.connect_button_press_event(move |_da, evb| {
-        if evb.get_button() == 1 {
-            //            println!("Starting drag...");
+        let gc = g2.clone();
+        let (x, y) = match evb.get_position() {
+            (a, b) => (a as f32, b as f32),
+        };
 
-            // check if there is currently a line drag (there should not be one)
-            let gc = g2.clone();
-            let mut line = gc.drag_line().write();
-            if line.is_none() {
-                let pt: (f32, f32) = match evb.get_position() {
-                    (a, b) => (a as f32, b as f32),
-                };
-                *line = Some((pt.into(), pt.into()));
-            }
-        }
+        gc.gui_mode()
+            .lock()
+            .mouse_press(evb.get_button(), Vector2F::new(x, y), &gc);
 
         Inhibit(false)
     });
@@ -60,69 +57,44 @@ pub fn build_ui(application: &Application, gui: Gui) {
         //        println!("Mouse motion: {:?}", evm.get_position());
 
         let gc = g3.clone();
-        let line = RwLock::upgradable_read(gc.drag_line());
-        if line.is_some() {
-            let mut line = RwLockUpgradableReadGuard::upgrade(line);
-            let pt: (f32, f32) = match evm.get_position() {
-                (a, b) => (a as f32, b as f32),
-            };
-            line.as_mut().unwrap().1 = pt.into();
-            mem::drop(line);
-            gc.drawing_area().queue_draw();
-        }
+        let (x, y) = match evm.get_position() {
+            (a, b) => (a as f32, b as f32),
+        };
+        gc.gui_mode().lock().mouse_move(Vector2F::new(x, y), &gc);
 
         Inhibit(false)
     });
     let g4 = gui.clone();
     window.connect_button_release_event(move |_da, evb| {
-        if evb.get_button() == 1 {
-            let gc = g4.clone();
-            let mut line = gc.drag_line().write();
-            let (pt1, pt2) = match line.take() {
-                Some((pt1, pt2)) => (pt1, pt2),
-                None => return Inhibit(false),
-            };
-
-            gc.project()
-                .write()
-                .current_frame_mut()
-                .add_buffered_line(pt1, pt2);
-            gc.update_image();
-        }
+        let gc = g4.clone();
+        let (x, y) = match evb.get_position() {
+            (a, b) => (a as f32, b as f32),
+        };
+        gc.gui_mode()
+            .lock()
+            .mouse_release(evb.get_button(), Vector2F::new(x, y), &gc);
 
         Inhibit(false)
     });
     let g5 = gui.clone();
     window.connect_key_press_event(move |_w, evk| {
+        use gdk::ModifierType;
+
         let gc = g5.clone();
         match evk.get_keyval().to_unicode() {
-            Some('d') => {
-                gc.project()
-                    .write()
-                    .current_frame_mut()
-                    .drop_buffered_lines();
-                gc.update_image();
-            }
-            Some('b') => {
-                let mut pr = gc.project().write();
-                let brush = pr.current_brush_index();
-                pr.current_frame_mut().bezierify_buffered_lines(brush, *gc.error().lock());
-                mem::drop(pr);
-                gc.update_image();
+            Some('s') => {
+                if let Err(e) = gc.save_project(
+                    evk.get_state() & ModifierType::SHIFT_MASK != ModifierType::empty(),
+                ) {
+                    eprintln!("Unable to save file: {}", e);
+                }
             }
             Some('e') => {
-                let e = gc.error();
-                let mut error = e.lock();
-                *error += 1.0;
-                println!("Error is {}", *error);
+                if let Err(e) = gc.export_project() {
+                    eprintln!("Unable to export file: {}", e);
+                }
             }
-            Some('r') => {
-                let e = gc.error();
-                let mut error = e.lock();
-                *error -= 1.0;
-                if *error < 0.0f32 { *error = 0.1f32; }
-                println!("Error is {}", *error);
-            }
+            Some(c) => gc.gui_mode().lock().key_press(c, &gc),
             _ => (),
         }
         Inhibit(false)
@@ -133,4 +105,5 @@ pub fn build_ui(application: &Application, gui: Gui) {
     gtk_box.pack_start(&*dr, true, true, 1);
     window.add(&gtk_box);
     window.show_all();
+    gui.set_main_window(window);
 }

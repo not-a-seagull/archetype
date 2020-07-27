@@ -71,13 +71,25 @@ impl GraphicalState {
     }
 
     /// Add a buffered line.
+    #[inline]
     pub fn add_buffered_line(&mut self, pt1: Point2D<f32>, pt2: Point2D<f32>) {
         self.buffered_lines.push([pt1, pt2]);
     }
 
     /// Drop the buffered lines.
+    #[inline]
     pub fn drop_buffered_lines(&mut self) {
         self.buffered_lines.clear();
+    }
+
+    /// Convert the buffered items into lines.
+    #[inline]
+    pub fn convert_buffered_lines(&mut self, brush: usize) {
+        self.lines.extend(
+            self.buffered_lines
+                .drain(..)
+                .map(|f| Line { points: f, brush }),
+        );
     }
 
     /// Convert the buffered items into a bezier curve.
@@ -98,11 +110,10 @@ impl GraphicalState {
                 .into_iter()
                 .map(|v| (v, brush)),
         );
-        println!("{:?}", &self.curves);
     }
 
     /// Rasterize this graphical state onto an image.
-    pub fn rasterize(&self, target: &RwLock<(RgbaImage, bool)>, project: &RwLock<Project>) {
+    pub fn rasterize(&self, target: &RwLock<(RgbaImage, bool)>, project: &Project) {
         struct BCIntervalIter {
             prev: f32,
             t_interval: f32,
@@ -149,11 +160,7 @@ impl GraphicalState {
         // draw some curves
         self.curves.par_iter().for_each(|(curve, ci)| {
             // get the brush we are using
-            let brush = project
-                .read()
-                .brush(*ci)
-                .expect("Brush ID Mismatch")
-                .clone();
+            let brush = project.brush(*ci).expect("Brush ID Mismatch").clone();
             let color = brush.color();
             let color = Rgba([
                 f2u8!(color.r()),
@@ -162,7 +169,7 @@ impl GraphicalState {
                 std::u8::MAX,
             ]);
 
-            let [start, control_a, control_b, end] = curve.clone().into_points(); 
+            let [start, control_a, control_b, end] = curve.clone().into_points();
             /*drawing::draw_cubic_bezier_curve_mut(
                 &mut img.0,
                 (start.x(), start.y()),
@@ -243,6 +250,34 @@ impl GraphicalState {
                 line,
                 Rgba([std::u8::MAX, 0, 0, std::u8::MAX]),
                 3,
+            );
+        });
+
+        // rasterize the lines
+        self.lines.par_iter().for_each(|ln| {
+            let brush = project.brush(ln.brush).expect("Brush ID Mismatch").clone();
+            let line = match ln.points {
+                [Point2D { x: x1, y: y1, .. }, Point2D { x: x2, y: y2, .. }] => LineSegment2F::new(
+                    Vector2F::new(x1 as f32, y1 as f32),
+                    Vector2F::new(x2 as f32, y2 as f32),
+                ),
+            };
+
+            let color = brush.color();
+            let color = Rgba([
+                f2u8!(color.r()),
+                f2u8!(color.g()),
+                f2u8!(color.b()),
+                std::u8::MAX,
+            ]);
+
+            rasterize_line(
+                target,
+                width as i32,
+                height as i32,
+                line,
+                color,
+                brush.width() as i32,
             );
         });
     }

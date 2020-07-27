@@ -1,12 +1,13 @@
 // GPL v3.0
 
-use super::{colors, Brush, GraphicalState};
+use super::{Color, colors, render, AlphaMaskTarget, Brush, GraphicalState, RenderTarget};
 use cairo::{Context, Format, ImageSurface};
 use euclid::default::Point2D;
-use gio::prelude::*;
+use gio::{prelude::*, ApplicationFlags};
 use glib::Bytes;
-use gtk::{prelude::*, Application, DrawingArea, Image as GtkImage};
+use gtk::{prelude::*, Application, ApplicationWindow, DrawingArea, Image as GtkImage};
 use image::{Rgba, RgbaImage};
+use once_cell::sync::OnceCell;
 use parking_lot::{
     MappedMutexGuard, MappedRwLockReadGuard, Mutex, MutexGuard, RwLock, RwLockReadGuard,
     RwLockUpgradableReadGuard, RwLockWriteGuard,
@@ -14,18 +15,33 @@ use parking_lot::{
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::{env, mem, sync::Arc};
+use std::{
+    env,
+    fs::File,
+    io::{self, prelude::*},
+    mem,
+    sync::Arc,
+};
 
+mod mode;
 mod ui;
 
 pub const DEFAULT_WIDTH: u32 = 300;
 pub const DEFAULT_HEIGHT: u32 = 200;
+
+pub use mode::*;
 
 #[inline]
 fn standard_brushes() -> SmallVec<[Brush; 10]> {
     let mut sm = SmallVec::new();
     sm.push(Brush::new(colors::BLACK, 2));
     sm
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
+enum ProjectSave {
+    Bincode,
+    Json,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -37,6 +53,8 @@ pub struct Project {
     frames: Vec<GraphicalState>,
     current_frame: usize,
     current_brush: usize,
+    filename: Option<String>,
+    filetype: Option<ProjectSave>,
 }
 
 impl Project {
@@ -64,44 +82,64 @@ impl Project {
     pub fn current_brush_index(&self) -> usize {
         self.current_brush
     }
+
+    #[inline]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[inline]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
 }
 
 struct GuiInternal {
     current_project: RwLock<Project>,
     image: RwLock<(RgbaImage, bool)>, // the bool is a flag to tell if it has been modified
     application: Application,
-    canvas: RwLock<Option<DrawingArea>>,
+
+    canvas: OnceCell<DrawingArea>,
+    main_window: OnceCell<ApplicationWindow>,
     surface: Mutex<Option<ImageSurface>>,
 
-    // the current drag starting point
-    drag_line: RwLock<Option<(Point2D<f32>, Point2D<f32>)>>,
-    // error for bezier curve calculation
-    error: Mutex<f32>,
+    gui_mode: Mutex<GuiModeStorage>,
+    past_gui_modes: Mutex<SmallVec<[GuiModeStorage; 5]>>,
 }
 
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct Gui(Arc<GuiInternal>);
 
-const BYTES_PER_PIXEL: i32 = 4;
-const DEFAULT_ERROR: f32 = 32.0;
+const DEFAULT_ERROR: f32 = 12.0;
 
 impl Gui {
     pub fn new(project: Project) -> Gui {
-        let application = Application::new(Some("com.notaseagull.archetype"), Default::default())
-            .expect("Unable to initialize GTK");
+        let application = Application::new(
+            Some("com.notaseagull.archetype"),
+            ApplicationFlags::HANDLES_COMMAND_LINE,
+        )
+        .expect("Unable to initialize GTK");
+
         let img = RgbaImage::from_pixel(project.width, project.height, Rgba([255, 255, 255, 0]));
         let mut gui = Self(Arc::new(GuiInternal {
             current_project: RwLock::new(project),
             application,
-            canvas: RwLock::new(None),
+            canvas: OnceCell::new(),
+            main_window: OnceCell::new(),
             image: RwLock::new((img, true)),
             surface: Mutex::new(None),
-            drag_line: RwLock::new(None),
-            error: Mutex::new(DEFAULT_ERROR),
+            gui_mode: Mutex::new(GuiModeStorage::Buffered(BufferedGuiMode::new(
+                DEFAULT_ERROR,
+            ))),
+            past_gui_modes: Mutex::new(SmallVec::new()),
         }));
 
         let cl = gui.clone();
+        gui.0.application.connect_command_line(|app, _cmd| {
+            app.activate();
+            0
+        });
         gui.0.application.connect_activate(move |app| {
             ui::build_ui(app, cl.clone());
             cl.update_image();
@@ -119,12 +157,16 @@ impl Gui {
             brushes: standard_brushes(),
             current_frame: 0,
             current_brush: 0,
+            filename: None,
+            filetype: None,
         };
         Self::new(project)
     }
 
     #[inline]
-    pub fn error(&self) -> &Mutex<f32> { &self.0.error }
+    pub fn gui_mode(&self) -> &Mutex<GuiModeStorage> {
+        &self.0.gui_mode
+    }
 
     #[inline]
     pub fn update_image(&self) {
@@ -141,18 +183,12 @@ impl Gui {
 
         let pr = self.0.current_project.read();
         let frame = &pr.frames[pr.current_frame];
-        frame.rasterize(&self.0.image, &self.0.current_project);
+        frame.rasterize(&self.0.image, &*pr);
         self.0
             .canvas
-            .read()
-            .as_ref()
+            .get()
             .expect("Canvas does not yet exist")
             .queue_draw();
-    }
-
-    #[inline]
-    pub fn drag_line(&self) -> &RwLock<Option<(Point2D<f32>, Point2D<f32>)>> {
-        &self.0.drag_line
     }
 
     #[inline]
@@ -162,7 +198,12 @@ impl Gui {
 
     #[inline]
     pub fn set_drawing_area(&self, dr: DrawingArea) {
-        *self.0.canvas.write() = Some(dr);
+        self.0.canvas.set(dr).unwrap();
+    }
+
+    #[inline]
+    pub fn set_main_window(&self, mw: ApplicationWindow) {
+        self.0.main_window.set(mw).unwrap();
     }
 
     #[inline]
@@ -174,11 +215,16 @@ impl Gui {
     }
 
     #[inline]
-    pub fn drawing_area(&self) -> MappedRwLockReadGuard<'_, DrawingArea> {
-        RwLockReadGuard::map(self.0.canvas.read(), |c| match c {
-            None => panic!("Drawing area does not exist"),
-            Some(ref dr) => dr,
-        })
+    pub fn drawing_area(&self) -> &DrawingArea {
+        self.0.canvas.get().expect("Drawing area does not exist")
+    }
+
+    #[inline]
+    pub fn main_window(&self) -> &ApplicationWindow {
+        self.0
+            .main_window
+            .get()
+            .expect("Application window does not exist")
     }
 
     #[inline]
@@ -277,14 +323,143 @@ impl Gui {
             context.set_source_surface(&*surface, 0.0 as f64, 0.0 as f64);
             context.paint();
 
-            // draw a red line on top of it if we need to
-            let drag_line = self.0.drag_line.read();
-            if let Some(ref drag_line) = &*drag_line {
-                context.set_source_rgb(1.0, 0.0, 0.0);
-                context.set_line_width(100.0);
-                context.move_to((drag_line.0).x.into(), (drag_line.0).y.into());
-                context.line_to((drag_line.1).x.into(), (drag_line.1).y.into());
-            }
+            self.gui_mode().lock().draw(self, context);
         }
+    }
+
+    #[inline]
+    pub fn hide(&self) {
+        self.main_window().hide();
+    }
+
+    #[inline]
+    pub fn show(&self) {
+        self.main_window().show_all();
+    }
+
+    #[inline]
+    pub fn save_project(&self, force_rename: bool) -> Result<(), &'static str> {
+        let pr = RwLock::upgradable_read(&self.0.current_project);
+        let pr = if pr.filename.is_none() || force_rename {
+            let mut pr = RwLockUpgradableReadGuard::upgrade(pr);
+            self.hide();
+
+            let si = io::stdin();
+            let so = io::stdout();
+            let mut stdin = si.lock();
+            let mut stdout = so.lock();
+
+            let mut filename = String::new();
+            let mut save_type = String::new();
+
+            stdout.write_all(b"Enter file name: ").unwrap();
+            stdout.flush().unwrap();
+            stdin.read_line(&mut filename).unwrap();
+
+            filename.pop();
+            pr.filename = Some(filename);
+
+            'stype: loop {
+                stdout
+                    .write_all(b"Save as bincode (b) or JSON (j): ")
+                    .unwrap();
+                stdout.flush().unwrap();
+                stdin.read_line(&mut save_type).unwrap();
+
+                match save_type.remove(0) {
+                    'b' => {
+                        pr.filetype = Some(ProjectSave::Bincode);
+                        break 'stype;
+                    }
+                    'j' => {
+                        pr.filetype = Some(ProjectSave::Json);
+                        break 'stype;
+                    }
+                    _ => (),
+                }
+            }
+
+            self.show();
+            RwLockWriteGuard::downgrade(pr)
+        } else {
+            RwLockUpgradableReadGuard::downgrade(pr)
+        };
+
+        // open the file for writing
+        let mut f =
+            File::create(pr.filename.as_ref().unwrap()).map_err(|_e| "Unable to open file")?;
+
+        match pr.filetype {
+            Some(ProjectSave::Bincode) => {
+                // use the bincode serializer to serialize the file to bytes
+                let bytes =
+                    bincode::serialize(&*pr).map_err(|_e| "Unable to serialize to bytes")?;
+                f.write_all(&bytes)
+                    .map_err(|_e| "Unable to write to file")?;
+            }
+            Some(ProjectSave::Json) => {
+                let json =
+                    serde_json::to_string(&*pr).map_err(|_e| "Unable to serialize to JSON")?;
+                f.write_all(json.as_bytes())
+                    .map_err(|_e| "Unable to write to file")?;
+            }
+            _ => unreachable!(),
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn export_project(&self) -> Result<(), &'static str> {
+        let si = io::stdin();
+        let so = io::stdout();
+        let mut stdin = si.lock();
+        let mut stdout = so.lock();
+
+        let mut filename = String::new();
+        let mut outtype_raw = String::new();
+        let mut outtype: Option<RenderTarget> = None;
+        let mut yn_alpha = String::new();
+
+        stdout.write_all(b"Enter export filename: ").unwrap();
+        stdout.flush().unwrap();
+        stdin.read_line(&mut filename).unwrap();
+
+        filename.pop();
+
+        const PROMPT: &'static [u8] = b"
+The following export file types are supported:
+ * (s)ingle image: Export the currently selected frame as a PNG image.
+ * (m)p4 video
+
+Enter format: ";
+
+        while outtype.is_none() {
+            stdout.write_all(PROMPT).unwrap();
+            stdout.flush().unwrap();
+            stdin.read_line(&mut outtype_raw).unwrap();
+
+            outtype = RenderTarget::from_char(outtype_raw.remove(0));
+        }
+
+        mem::drop(stdin);
+        mem::drop(stdout);
+
+        let mut alphaname = filename.clone();
+        let am = if outtype.unwrap().is_single_image() {
+            AlphaMaskTarget::Background(unsafe { Color::new_unchecked(0.0, 0.0, 0.0) })
+        } else if crate::interactive_yn("Export an alpha mask alongside the final product?") {
+            alphaname.push_str(".alpha");
+            AlphaMaskTarget::AlphaMask(&alphaname)
+        } else {
+            AlphaMaskTarget::Background(crate::interactive_color("background color"))
+        };
+
+        render(
+            &*self.0.current_project.read(),
+            &filename,
+            outtype.unwrap(),
+            am,
+        )
     }
 }
