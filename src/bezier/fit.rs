@@ -1,6 +1,7 @@
 //! Adapted from https://github.com/Logicalshift/flo_curves/blob/master/src/bezier/fit.rs
 
-use super::BezierCurve;
+use super::{de_casteljau2, de_casteljau3, BezierCurve};
+use crate::Point;
 use pathfinder_geometry::vector::Vector2F;
 
 /// Maximum number of iterations to perform when trying to improve the curve fit
@@ -158,7 +159,7 @@ fn chords_for_points(points: &[Vector2F]) -> Vec<f32> {
     // Compute the distances for each point
     distances.push(total_distance);
     for p in 1..points.len() {
-        total_distance += distance(&points[p - 1], &points[p]);
+        total_distance += points[p - 1].distance_to(&points[p]);
         distances.push(total_distance);
     }
 
@@ -236,7 +237,7 @@ fn generate_bezier(
     };
 
     // Use the Wu/Barsky heuristic if alpha-negative
-    let seg_length = distance(&points[0], &last_point);
+    let seg_length = points[0].distance_to(&last_point);
     let epsilon = 1.0e-6 * seg_length;
 
     if alpha_l < epsilon || alpha_r < epsilon {
@@ -357,41 +358,4 @@ fn newton_raphson_root_find(curve: &BezierCurve, point: &Vector2F, estimated_t: 
     } else {
         estimated_t - (numerator / denominator)
     }
-}
-
-///
-/// de Casteljau's algorithm for cubic bezier curves
-///
-#[inline]
-pub fn de_casteljau4(t: f32, w1: Vector2F, w2: Vector2F, w3: Vector2F, w4: Vector2F) -> Vector2F {
-    let wn1 = w1 * (1.0 - t) + w2 * t;
-    let wn2 = w2 * (1.0 - t) + w3 * t;
-    let wn3 = w3 * (1.0 - t) + w4 * t;
-
-    de_casteljau3(t, wn1, wn2, wn3)
-}
-
-///
-/// de Casteljau's algorithm for quadratic bezier curves
-///
-#[inline]
-pub fn de_casteljau3(t: f32, w1: Vector2F, w2: Vector2F, w3: Vector2F) -> Vector2F {
-    let wn1 = w1 * (1.0 - t) + w2 * t;
-    let wn2 = w2 * (1.0 - t) + w3 * t;
-
-    de_casteljau2(t, wn1, wn2)
-}
-
-///
-/// de Casteljau's algorithm for lines
-///
-#[inline]
-pub fn de_casteljau2(t: f32, w1: Vector2F, w2: Vector2F) -> Vector2F {
-    w1 * (1.0 - t) + w2 * t
-}
-
-#[inline]
-fn distance(v1: &Vector2F, v2: &Vector2F) -> f32 {
-    let a = (v1.x() - v2.x()).powi(2) + (v1.y() - v2.y()).powi(2);
-    a.sqrt()
 }

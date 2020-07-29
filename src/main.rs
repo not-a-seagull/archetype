@@ -5,20 +5,26 @@
 
 mod bezier;
 mod brush;
+mod drawing;
+mod geometry;
 mod gui;
 mod interactive;
-mod polynomial;
+mod polygon;
 mod render;
 mod state;
 
 pub use bezier::*;
 pub use brush::*;
+pub use drawing::*;
+pub use geometry::*;
 pub use gui::*;
 pub use interactive::*;
-pub use polynomial::*;
+pub use polygon::*;
 pub use render::*;
 pub use state::*;
 
+use image::{ImageBuffer, Rgba};
+use parking_lot::RwLock;
 use std::{
     env,
     fs::File,
@@ -26,6 +32,11 @@ use std::{
     mem, thread,
     time::Duration,
 };
+
+/// A true-color RGBA image.
+pub type TCImage = ImageBuffer<Rgba<u16>, Vec<u16>>;
+/// The locked image buffer.
+pub type DrawTarget = RwLock<(TCImage, bool)>;
 
 // spawns a quick deadlock detector
 fn deadlock_detector() {

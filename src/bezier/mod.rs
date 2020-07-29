@@ -1,8 +1,11 @@
 // GPL v3.0
 
+use super::{rasterize_line, Brush, DrawTarget, Point, Rasterizable};
+use parking_lot::RwLock;
 use pathfinder_geometry::{line_segment::LineSegment2F, vector::Vector2F};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
+use std::{mem, ops::Range};
 
 mod fit;
 
@@ -71,7 +74,7 @@ impl BezierCurve {
     #[inline]
     pub fn eval(&self, param: f32) -> Vector2F {
         match &self.points {
-            [ref p1, ref p2, ref p3, ref p4] => fit::de_casteljau4(param, *p1, *p2, *p3, *p4),
+            [ref p1, ref p2, ref p3, ref p4] => de_casteljau4(param, *p1, *p2, *p3, *p4),
         }
     }
 
@@ -84,4 +87,103 @@ impl BezierCurve {
     pub fn points(&self) -> &[Vector2F; 4] {
         &self.points
     }
+
+    #[inline]
+    pub fn edges(&self) -> Edges<'_> {
+        let [start, control_a, control_b, end] = self.points();
+
+        let curve_length_bound = start.distance_to(control_a)
+            + control_a.distance_to(control_b)
+            + control_b.distance_to(end);
+        let clb2 = curve_length_bound.powi(2);
+
+        let num_segments = ((clb2 + 800.0).sqrt() / 8.0) as i32;
+        let t_interval = 1f32 / (num_segments as f32);
+
+        Edges {
+            curve: self,
+            internal: (0..num_segments),
+            t_interval,
+            prev: 0.0,
+        }
+    }
+}
+
+impl Rasterizable for BezierCurve {
+    #[inline]
+    fn rasterize(&self, target: &DrawTarget, brush: Brush) {
+        self.edges()
+            .collect::<Vec<LineSegment2F>>()
+            .iter()
+            .for_each(|l| l.rasterize(target, brush))
+    }
+}
+
+/// Iterate over a Bezier curve's edges.
+pub struct Edges<'a> {
+    curve: &'a BezierCurve,
+    internal: Range<i32>,
+    prev: f32,
+    t_interval: f32,
+}
+
+impl<'a> Iterator for Edges<'a> {
+    type Item = LineSegment2F;
+
+    #[inline]
+    fn next(&mut self) -> Option<LineSegment2F> {
+        let i = match self.internal.next() {
+            Some(i) => i,
+            None => return None,
+        };
+
+        // figure out which T's to evaluate at
+        let mut t1 = (i as f32 + 1.0) * self.t_interval;
+        let t2 = t1;
+        mem::swap(&mut self.prev, &mut t1);
+
+        // evaluate the points at the t's
+        let a1 = self.curve.eval(t1);
+        let a2 = self.curve.eval(t2);
+
+        Some(LineSegment2F::new(a1, a2))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.internal.size_hint()
+    }
+}
+
+impl<'a> ExactSizeIterator for Edges<'a> {}
+
+///
+/// de Casteljau's algorithm for cubic bezier curves
+///
+#[inline]
+pub fn de_casteljau4(t: f32, w1: Vector2F, w2: Vector2F, w3: Vector2F, w4: Vector2F) -> Vector2F {
+    let wn1 = w1 * (1.0 - t) + w2 * t;
+    let wn2 = w2 * (1.0 - t) + w3 * t;
+    let wn3 = w3 * (1.0 - t) + w4 * t;
+
+    de_casteljau3(t, wn1, wn2, wn3)
+}
+
+///
+/// de Casteljau's algorithm for quadratic bezier curves
+///
+#[inline]
+pub fn de_casteljau3(t: f32, w1: Vector2F, w2: Vector2F, w3: Vector2F) -> Vector2F {
+    let wn1 = w1 * (1.0 - t) + w2 * t;
+    let wn2 = w2 * (1.0 - t) + w3 * t;
+
+    de_casteljau2(t, wn1, wn2)
+}
+
+///
+/// de Casteljau's algorithm for lines
+///
+#[inline]
+pub fn de_casteljau2(t: f32, w1: Vector2F, w2: Vector2F) -> Vector2F {
+    w1 * (1.0 - t) + w2 * t
 }

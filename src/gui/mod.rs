@@ -1,17 +1,15 @@
 // GPL v3.0
 
-use super::{Color, colors, render, AlphaMaskTarget, Brush, GraphicalState, RenderTarget};
+use super::{
+    colors, render, AlphaMaskTarget, Brush, Color, DrawTarget, GraphicalState, RenderTarget,
+    TCImage,
+};
 use cairo::{Context, Format, ImageSurface};
-use euclid::default::Point2D;
 use gio::{prelude::*, ApplicationFlags};
-use glib::Bytes;
-use gtk::{prelude::*, Application, ApplicationWindow, DrawingArea, Image as GtkImage};
+use gtk::{prelude::*, Application, ApplicationWindow, DrawingArea};
 use image::{Rgba, RgbaImage};
 use once_cell::sync::OnceCell;
-use parking_lot::{
-    MappedMutexGuard, MappedRwLockReadGuard, Mutex, MutexGuard, RwLock, RwLockReadGuard,
-    RwLockUpgradableReadGuard, RwLockWriteGuard,
-};
+use parking_lot::{Mutex, MutexGuard, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -25,9 +23,6 @@ use std::{
 
 mod mode;
 mod ui;
-
-pub const DEFAULT_WIDTH: u32 = 300;
-pub const DEFAULT_HEIGHT: u32 = 200;
 
 pub use mode::*;
 
@@ -96,7 +91,7 @@ impl Project {
 
 struct GuiInternal {
     current_project: RwLock<Project>,
-    image: RwLock<(RgbaImage, bool)>, // the bool is a flag to tell if it has been modified
+    image: DrawTarget,
     application: Application,
 
     canvas: OnceCell<DrawingArea>,
@@ -111,8 +106,6 @@ struct GuiInternal {
 #[repr(transparent)]
 pub struct Gui(Arc<GuiInternal>);
 
-const DEFAULT_ERROR: f32 = 12.0;
-
 impl Gui {
     pub fn new(project: Project) -> Gui {
         let application = Application::new(
@@ -121,7 +114,11 @@ impl Gui {
         )
         .expect("Unable to initialize GTK");
 
-        let img = RgbaImage::from_pixel(project.width, project.height, Rgba([255, 255, 255, 0]));
+        let img = TCImage::from_pixel(
+            project.width,
+            project.height,
+            Rgba([std::u16::MAX, std::u16::MAX, std::u16::MAX, 0]),
+        );
         let mut gui = Self(Arc::new(GuiInternal {
             current_project: RwLock::new(project),
             application,
@@ -169,6 +166,31 @@ impl Gui {
     }
 
     #[inline]
+    pub fn take_matching_gui_mode(&self, ty: GuiModeType) -> Option<GuiModeStorage> {
+        let mut past_modes = self.0.past_gui_modes.lock();
+        let posn = (&*(&*past_modes))
+            .par_iter()
+            .position_any(|m| m.kind() == ty);
+        posn.map(|p| past_modes.remove(p))
+    }
+
+    #[inline]
+    pub fn store_gui_mode(&self) {
+        let mut switch_mode = GuiModeStorage::Switching;
+        let mut current_mode = self.0.gui_mode.lock();
+        
+        if let GuiModeStorage::Switching = &*current_mode {
+            // do nothing
+        } else {
+            mem::swap(&mut switch_mode, &mut current_mode);
+            mem::drop(current_mode);
+            switch_mode.switch_out(self);
+            let mut past_gui_modes = self.0.past_gui_modes.lock();
+            past_gui_modes.push(switch_mode);
+        }
+    }
+
+    #[inline]
     pub fn update_image(&self) {
         // wipe the image
         self.0
@@ -184,11 +206,7 @@ impl Gui {
         let pr = self.0.current_project.read();
         let frame = &pr.frames[pr.current_frame];
         frame.rasterize(&self.0.image, &*pr);
-        self.0
-            .canvas
-            .get()
-            .expect("Canvas does not yet exist")
-            .queue_draw();
+        self.drawing_area().queue_draw();
     }
 
     #[inline]
@@ -250,7 +268,10 @@ impl Gui {
             .as_flat_samples()
             .image_slice()
             .expect("Unable to get image data")
-            .into();
+            .iter()
+            .copied()
+            .map(|i| normalize(i))
+            .collect();
 
         *surface = Some(
             ImageSurface::create_for_data(
@@ -296,7 +317,9 @@ impl Gui {
                     row.for_each(|(x, _y, pixel)| {
                         let pixel: [u8; 4] = match pixel.0 {
                             [_, _, _, 0] => [219, 252, 255, 255],
-                            [r, g, b, a] => [b, g, r, a],
+                            [r, g, b, a] => {
+                                [normalize(b), normalize(g), normalize(r), normalize(a)]
+                            }
                         };
 
                         data.iter_mut()
@@ -320,7 +343,7 @@ impl Gui {
                 mem::drop(img);
             }
 
-            context.set_source_surface(&*surface, 0.0 as f64, 0.0 as f64);
+            context.set_source_surface(&*surface, 0.0f64, 0.0f64);
             context.paint();
 
             self.gui_mode().lock().draw(self, context);
@@ -419,7 +442,7 @@ impl Gui {
         let mut filename = String::new();
         let mut outtype_raw = String::new();
         let mut outtype: Option<RenderTarget> = None;
-        let mut yn_alpha = String::new();
+        let yn_alpha = String::new();
 
         stdout.write_all(b"Enter export filename: ").unwrap();
         stdout.flush().unwrap();
@@ -462,4 +485,10 @@ Enter format: ";
             am,
         )
     }
+}
+
+// normalize the truecolor u16's to u8's
+#[inline]
+fn normalize(i: u16) -> u8 {
+    ((i as f32 / std::u16::MAX as f32) * std::u8::MAX as f32) as u8
 }

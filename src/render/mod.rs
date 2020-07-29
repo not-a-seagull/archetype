@@ -1,6 +1,6 @@
 // MIT License
 
-use super::{Color, Project};
+use super::{Color, DrawTarget, Project, TCImage};
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use parking_lot::RwLock;
 
@@ -43,14 +43,17 @@ pub fn single_image<'a>(
 ) -> Result<(), &'static str> {
     // rasterize onto an image
     let img = RwLock::new((
-        RgbaImage::from_pixel(project.width(), project.height(), Rgba([0, 0, 0, 0])),
+        TCImage::from_pixel(project.width(), project.height(), Rgba([0, 0, 0, 0])),
         true,
     ));
     project.current_frame().rasterize(&img, project);
-    let img = DynamicImage::ImageRgba8(img.into_inner().0);
+    let img = DynamicImage::ImageRgba16(img.into_inner().0);
 
     img.save_with_format(filename, ImageFormat::Png)
-        .map_err(|e| { eprintln!("{:?}", e); "Unable to write image to file"})?;
+        .map_err(|e| {
+            eprintln!("{:?}", e);
+            "Unable to write image to file"
+        })?;
 
     Ok(())
 }

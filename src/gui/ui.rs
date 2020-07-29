@@ -1,12 +1,7 @@
 // GPL v3.0
 
-use super::{Gui, GuiMode, DEFAULT_HEIGHT, DEFAULT_WIDTH};
+use super::{Gui, GuiMode};
 use euclid::point2;
-use gio::{prelude::*, subclass::prelude::*};
-use glib::{
-    subclass::{self, prelude::*},
-    Object,
-};
 use gtk::{
     prelude::*, subclass::prelude::*, Align, Application, ApplicationWindow, Box as GtkBox,
     DrawingArea, DrawingAreaBuilder, Fixed, Image as GtkImage, Inhibit, Orientation, Widget,
@@ -93,6 +88,11 @@ pub fn build_ui(application: &Application, gui: Gui) {
                 if let Err(e) = gc.export_project() {
                     eprintln!("Unable to export file: {}", e);
                 }
+            }
+            Some('m') => {
+                // switch into switch mode
+                gc.store_gui_mode();
+                println!("Activated switch mode");
             }
             Some(c) => gc.gui_mode().lock().key_press(c, &gc),
             _ => (),

@@ -1,5 +1,6 @@
 // GPL v3.0
 
+use image::Rgba;
 use ordered_float::NotNan;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -71,6 +72,22 @@ impl Color {
     pub fn b(&self) -> f32 {
         self.b.into_inner()
     }
+
+    #[inline]
+    pub fn into_rgba(self) -> Rgba<u16> {
+        macro_rules! f2u16 {
+            ($val: expr) => {{
+                ($val * (std::u16::MAX as f32)) as u16
+            }};
+        }
+
+        Rgba([
+            f2u16!(self.r()),
+            f2u16!(self.g()),
+            f2u16!(self.b()),
+            std::u16::MAX,
+        ])
+    }
 }
 
 pub mod colors {
@@ -90,7 +107,7 @@ pub struct Brush {
 
 impl Brush {
     #[inline]
-    pub fn new(color: Color, width: u32) -> Self {
+    pub const fn new(color: Color, width: u32) -> Self {
         Self { color, width }
     }
 
