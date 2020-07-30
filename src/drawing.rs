@@ -8,32 +8,36 @@ use std::mem;
 
 // function to rasterize a line with a drawing function
 #[inline]
-fn rasterize_line_custom<F, Ln: Line<f32>>(c: &DrawTarget, line: &Ln, brush: Brush, f: F)
-where
-    F: Fn(&DrawTarget, i32, i32, &Brush) + Sync,
+fn rasterize_line_custom<F, Ln: Line<f32>>(
+    width: u32,
+    height: u32,
+    line: &Ln,
+    brush: Brush,
+    mut f: F,
+) where
+    F: FnMut(i32, i32, &Brush),
 {
     let line_iter =
         BresenhamLineIter::new((line.from_x(), line.from_y()), (line.to_x(), line.to_y()));
 
-    let img = c.read();
-    let (width, height) = img.0.dimensions();
-    mem::drop(img);
-
     line_iter
-        .collect::<Vec<(i32, i32)>>()
-        .par_iter()
         .filter(|(x, y)| *x >= 0 && *x < width as i32 && *y >= 0 && *y < height as i32)
         .for_each(|(x, y)| {
-            f(&c, *x, *y, &brush);
+            f(x, y, &brush);
         });
 }
 
 // function to draw a 1-pixel wide line segment onto the canvas
 #[inline]
-pub fn rasterize_thin_line<Ln: Line<f32>>(c: &DrawTarget, line: &Ln, brush: Brush) {
-    rasterize_line_custom(c, line, brush, |c, x, y, brush| {
-        println!("Drawing pixel at {}, {}", x, y);
-        c.write().0.draw_pixel(
+fn rasterize_thin_line_internal<Ln: Line<f32>>(
+    c: &mut TCImage,
+    width: u32,
+    height: u32,
+    line: &Ln,
+    brush: Brush,
+) {
+    rasterize_line_custom(width, height, line, brush, |x, y, brush| {
+        c.draw_pixel(
             x as u32,
             y as u32,
             brush.color(x as u32, y as u32).into_rgba(),
@@ -41,9 +45,26 @@ pub fn rasterize_thin_line<Ln: Line<f32>>(c: &DrawTarget, line: &Ln, brush: Brus
     });
 }
 
+#[inline]
+pub fn rasterize_thin_line<Ln: Line<f32>>(c: &DrawTarget, line: &Ln, brush: Brush) {
+    let img = RwLock::upgradable_read(c);
+    let (width, height) = img.0.dimensions();
+    let mut writer = RwLockUpgradableReadGuard::upgrade(img);
+
+    rasterize_thin_line_internal(&mut writer.0, width, height, line, brush)
+}
+
 // function to draw an ellipse
 #[inline]
-fn rasterize_circle(c: &DrawTarget, x0: f32, y0: f32, radius: u32, brush: Brush) {
+fn rasterize_circle(
+    c: &mut TCImage,
+    width: u32,
+    height: u32,
+    x0: f32,
+    y0: f32,
+    radius: u32,
+    brush: Brush,
+) {
     struct CircleRasterizer {
         x: i32,
         y: i32,
@@ -54,7 +75,7 @@ fn rasterize_circle(c: &DrawTarget, x0: f32, y0: f32, radius: u32, brush: Brush)
         type Item = (i32, i32);
 
         fn next(&mut self) -> Option<(i32, i32)> {
-            if self.x <= self.y {
+            if self.x > self.y {
                 return None;
             }
 
@@ -79,58 +100,49 @@ fn rasterize_circle(c: &DrawTarget, x0: f32, y0: f32, radius: u32, brush: Brush)
         y: radius as i32,
         p: 1 - radius as i32,
     }
-    .collect::<Vec<(i32, i32)>>()
-    .par_iter()
     .for_each(|(x, y)| {
-        rayon::join(
-            || {
-                rayon::join(
-                    || {
-                        rasterize_thin_line(
-                            c,
-                            &(
-                                ((x0 - x) as f32, (y0 + y) as f32),
-                                ((x0 + x) as f32, (y0 + y) as f32),
-                            ),
-                            brush.clone(),
-                        )
-                    },
-                    || {
-                        rasterize_thin_line(
-                            c,
-                            &(
-                                ((x0 - y) as f32, (y0 + x) as f32),
-                                ((x0 + y) as f32, (y0 + x) as f32),
-                            ),
-                            brush.clone(),
-                        )
-                    },
-                );
-            },
-            || {
-                rayon::join(
-                    || {
-                        rasterize_thin_line(
-                            c,
-                            &(
-                                ((x0 - x) as f32, (y0 - y) as f32),
-                                ((x0 + x) as f32, (y0 - y) as f32),
-                            ),
-                            brush.clone(),
-                        )
-                    },
-                    || {
-                        rasterize_thin_line(
-                            c,
-                            &(
-                                ((x0 - y) as f32, (y0 - x) as f32),
-                                ((x0 + y) as f32, (y0 - x) as f32),
-                            ),
-                            brush.clone(),
-                        )
-                    },
-                );
-            },
+        rasterize_thin_line_internal(
+            c,
+            width,
+            height,
+            &(
+                ((x0 - x) as f32, (y0 + y) as f32),
+                ((x0 + x) as f32, (y0 + y) as f32),
+            ),
+            brush.clone(),
+        );
+
+        rasterize_thin_line_internal(
+            c,
+            width,
+            height,
+            &(
+                ((x0 - y) as f32, (y0 + x) as f32),
+                ((x0 + y) as f32, (y0 + x) as f32),
+            ),
+            brush.clone(),
+        );
+
+        rasterize_thin_line_internal(
+            c,
+            width,
+            height,
+            &(
+                ((x0 - x) as f32, (y0 - y) as f32),
+                ((x0 + x) as f32, (y0 - y) as f32),
+            ),
+            brush.clone(),
+        );
+
+        rasterize_thin_line_internal(
+            c,
+            width,
+            height,
+            &(
+                ((x0 - y) as f32, (y0 - x) as f32),
+                ((x0 + y) as f32, (y0 - x) as f32),
+            ),
+            brush.clone(),
         );
     });
 }
@@ -138,8 +150,19 @@ fn rasterize_circle(c: &DrawTarget, x0: f32, y0: f32, radius: u32, brush: Brush)
 // function to draw a thicker line segment onto a canvas
 #[inline]
 pub fn rasterize_thick_line<Ln: Line<f32>>(c: &DrawTarget, line: &Ln, brush: Brush) {
-    rasterize_line_custom(c, line, brush, |c, x, y, brush| {
-        rasterize_circle(c, x as f32, y as f32, brush.width(), brush.clone());
+    let img = RwLock::upgradable_read(c);
+    let (width, height) = img.0.dimensions();
+    let mut writer = RwLockUpgradableReadGuard::upgrade(img);
+    rasterize_line_custom(width, height, line, brush, |x, y, brush| {
+        rasterize_circle(
+            &mut writer.0,
+            width,
+            height,
+            x as f32,
+            y as f32,
+            brush.width(),
+            brush.clone(),
+        );
     });
 }
 
