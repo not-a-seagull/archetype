@@ -8,7 +8,7 @@ use pathfinder_geometry::vector::Vector2F;
 use std::mem;
 
 mod buffered;
-pub use buffered::{DEFAULT_ERROR, BufferedGuiMode};
+pub use buffered::{BufferedGuiMode, DEFAULT_ERROR};
 mod freedraw;
 pub use freedraw::*;
 

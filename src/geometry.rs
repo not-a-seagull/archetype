@@ -292,7 +292,7 @@ impl Line<f32> for LineSegment2F {
     }
     #[inline]
     fn from_x(&self) -> f32 {
-        LineSegment2F::from_y(*self)
+        LineSegment2F::from_x(*self)
     }
     #[inline]
     fn to_y(&self) -> f32 {

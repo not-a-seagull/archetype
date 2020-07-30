@@ -33,8 +33,13 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "true_color")]
+pub type ColorAtom = u16;
+#[cfg(not(feature = "true_color"))]
+pub type ColorAtom = u8;
+
 /// A true-color RGBA image.
-pub type TCImage = ImageBuffer<Rgba<u16>, Vec<u16>>;
+pub type TCImage = ImageBuffer<Rgba<ColorAtom>, Vec<ColorAtom>>;
 /// The locked image buffer.
 pub type DrawTarget = RwLock<(TCImage, bool)>;
 

@@ -30,12 +30,6 @@ pub struct GraphicalState {
     lines: Vec<Line>,
 }
 
-macro_rules! f2u8 {
-    ($val: expr) => {{
-        ($val * (std::u8::MAX as f32)) as u8
-    }};
-}
-
 impl GraphicalState {
     pub fn new() -> Self {
         Self {

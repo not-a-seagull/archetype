@@ -3,6 +3,7 @@
 use super::{de_casteljau2, de_casteljau3, BezierCurve};
 use crate::Point;
 use pathfinder_geometry::vector::Vector2F;
+use rayon::prelude::*;
 
 /// Maximum number of iterations to perform when trying to improve the curve fit
 const MAX_ITERATIONS: usize = 4;
@@ -159,7 +160,7 @@ fn chords_for_points(points: &[Vector2F]) -> Vec<f32> {
     // Compute the distances for each point
     distances.push(total_distance);
     for p in 1..points.len() {
-        total_distance += points[p - 1].distance_to(&points[p]);
+        total_distance += super::distance(&points[p - 1], &points[p]);
         distances.push(total_distance);
     }
 
@@ -237,7 +238,7 @@ fn generate_bezier(
     };
 
     // Use the Wu/Barsky heuristic if alpha-negative
-    let seg_length = points[0].distance_to(&last_point);
+    let seg_length = super::distance(&points[0], &last_point);
     let epsilon = 1.0e-6 * seg_length;
 
     if alpha_l < epsilon || alpha_r < epsilon {

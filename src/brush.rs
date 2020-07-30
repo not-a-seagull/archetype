@@ -1,6 +1,7 @@
 // GPL v3.0
 
-use image::Rgba;
+use image::{Primitive, Rgba};
+use num_traits::{AsPrimitive, Bounded};
 use ordered_float::NotNan;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -74,18 +75,23 @@ impl Color {
     }
 
     #[inline]
-    pub fn into_rgba(self) -> Rgba<u16> {
-        macro_rules! f2u16 {
-            ($val: expr) => {{
-                ($val * (std::u16::MAX as f32)) as u16
-            }};
+    pub fn into_rgba<T: Primitive + Bounded + Into<f32> + Copy + 'static>(self) -> Rgba<T>
+    where
+        f32: AsPrimitive<T>,
+    {
+        #[inline]
+        fn clamp_float<T: Primitive + Bounded + Into<f32> + Copy + 'static>(f: f32) -> T
+        where
+            f32: AsPrimitive<T>,
+        {
+            (f * T::max_value().into()).as_()
         }
 
         Rgba([
-            f2u16!(self.r()),
-            f2u16!(self.g()),
-            f2u16!(self.b()),
-            std::u16::MAX,
+            clamp_float(self.r()),
+            clamp_float(self.g()),
+            clamp_float(self.b()),
+            T::max_value(),
         ])
     }
 }

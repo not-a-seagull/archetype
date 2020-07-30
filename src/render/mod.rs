@@ -47,7 +47,11 @@ pub fn single_image<'a>(
         true,
     ));
     project.current_frame().rasterize(&img, project);
+
+    #[cfg(feature = "true_color")]
     let img = DynamicImage::ImageRgba16(img.into_inner().0);
+    #[cfg(not(feature = "true_color"))]
+    let img = DynamicImage::ImageRgba8(img.into_inner().0);
 
     img.save_with_format(filename, ImageFormat::Png)
         .map_err(|e| {

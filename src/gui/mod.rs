@@ -1,8 +1,8 @@
 // GPL v3.0
 
 use super::{
-    colors, render, AlphaMaskTarget, Brush, Color, DrawTarget, GraphicalState, RenderTarget,
-    TCImage,
+    colors, render, AlphaMaskTarget, Brush, Color, ColorAtom, DrawTarget, GraphicalState,
+    RenderTarget, TCImage,
 };
 use cairo::{Context, Format, ImageSurface};
 use gio::{prelude::*, ApplicationFlags};
@@ -114,11 +114,7 @@ impl Gui {
         )
         .expect("Unable to initialize GTK");
 
-        let img = TCImage::from_pixel(
-            project.width,
-            project.height,
-            Rgba([std::u16::MAX, std::u16::MAX, std::u16::MAX, 0]),
-        );
+        let img = TCImage::from_pixel(project.width, project.height, Rgba([0, 0, 0, 0]));
         let mut gui = Self(Arc::new(GuiInternal {
             current_project: RwLock::new(project),
             application,
@@ -178,7 +174,7 @@ impl Gui {
     pub fn store_gui_mode(&self) {
         let mut switch_mode = GuiModeStorage::Switching;
         let mut current_mode = self.0.gui_mode.lock();
-        
+
         if let GuiModeStorage::Switching = &*current_mode {
             // do nothing
         } else {
@@ -488,7 +484,14 @@ Enter format: ";
 }
 
 // normalize the truecolor u16's to u8's
+#[cfg(feature = "true_color")]
 #[inline]
 fn normalize(i: u16) -> u8 {
     ((i as f32 / std::u16::MAX as f32) * std::u8::MAX as f32) as u8
+}
+
+#[cfg(not(feature = "true_color"))]
+#[inline]
+fn normalize(i: u8) -> u8 {
+    i
 }

@@ -27,3 +27,7 @@ smallvec = { version = "1.4.1", features = ["const_generics", "union", "serde"] 
 
 [profile.release]
 lto = true
+
+[features]
+default = ["true_color"]
+true_color = []

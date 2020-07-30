@@ -92,9 +92,9 @@ impl BezierCurve {
     pub fn edges(&self) -> Edges<'_> {
         let [start, control_a, control_b, end] = self.points();
 
-        let curve_length_bound = start.distance_to(control_a)
-            + control_a.distance_to(control_b)
-            + control_b.distance_to(end);
+        let curve_length_bound = distance(start, control_a)
+            + distance(control_a, control_b)
+            + distance(control_b, end);
         let clb2 = curve_length_bound.powi(2);
 
         let num_segments = ((clb2 + 800.0).sqrt() / 8.0) as i32;
@@ -186,4 +186,10 @@ pub fn de_casteljau3(t: f32, w1: Vector2F, w2: Vector2F, w3: Vector2F) -> Vector
 #[inline]
 pub fn de_casteljau2(t: f32, w1: Vector2F, w2: Vector2F) -> Vector2F {
     w1 * (1.0 - t) + w2 * t
+}
+
+#[inline]
+pub fn distance(v1: &Vector2F, v2: &Vector2F) -> f32 {
+    let a = (v1.x() - v2.x()).powi(2) + (v1.y() - v2.y()).powi(2);
+    a.sqrt()
 }

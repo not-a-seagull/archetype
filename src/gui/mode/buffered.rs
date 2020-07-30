@@ -50,6 +50,7 @@ impl GuiMode for BufferedGuiMode {
                 gui.update_image();
             }
             'b' => {
+                println!("Buffering lines...");
                 let mut pr = gui.project().write();
                 let brush = pr.current_brush_index();
                 pr.current_frame_mut()
@@ -83,7 +84,6 @@ impl GuiMode for BufferedGuiMode {
     fn mouse_press(&mut self, btn: u32, pt: Vector2F, gui: &Gui) {
         if btn == 1 {
             // check if there is currently a line drag (there should not be one)
-            println!("Click at {:?}", pt);
             if self.drag_line.is_none() {
                 self.drag_line = Some((pt, pt));
             }
@@ -93,7 +93,6 @@ impl GuiMode for BufferedGuiMode {
     #[inline]
     fn mouse_release(&mut self, btn: u32, pt: Vector2F, gui: &Gui) {
         if let (1, Some((pt1, pt2))) = (btn, self.drag_line.take()) {
-            println!("Release at {:?}", pt);
             let (pt1, pt2) = (
                 Point2D::new(pt1.x(), pt1.y()),
                 Point2D::new(pt2.x(), pt2.y()),
