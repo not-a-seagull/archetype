@@ -307,3 +307,26 @@ impl Line<f32> for LineSegment2F {
         Self::new(Vector2F::new(x1, y1), Vector2F::new(x2, y2))
     }
 }
+
+impl<T: Copy> Line<T> for ((T, T), (T, T)) {
+    #[inline]
+    fn to_x(&self) -> T {
+        (self.1).0
+    }
+    #[inline]
+    fn from_x(&self) -> T {
+        (self.0).0
+    }
+    #[inline]
+    fn to_y(&self) -> T {
+        (self.1).1
+    }
+    #[inline]
+    fn from_y(&self) -> T {
+        (self.0).1
+    }
+    #[inline]
+    fn from_x1_y1_x2_y2(x1: T, y1: T, x2: T, y2: T) -> Self {
+        ((x1, y1), (x2, y2))
+    }
+}

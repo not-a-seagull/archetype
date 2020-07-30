@@ -1,6 +1,6 @@
 // GPL v3.0
 
-use super::{rasterize_line, Brush, DrawTarget, Point, Rasterizable};
+use super::{Brush, DrawTarget, Point, Rasterizable};
 use parking_lot::RwLock;
 use pathfinder_geometry::{line_segment::LineSegment2F, vector::Vector2F};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -92,9 +92,8 @@ impl BezierCurve {
     pub fn edges(&self) -> Edges<'_> {
         let [start, control_a, control_b, end] = self.points();
 
-        let curve_length_bound = distance(start, control_a)
-            + distance(control_a, control_b)
-            + distance(control_b, end);
+        let curve_length_bound =
+            distance(start, control_a) + distance(control_a, control_b) + distance(control_b, end);
         let clb2 = curve_length_bound.powi(2);
 
         let num_segments = ((clb2 + 800.0).sqrt() / 8.0) as i32;

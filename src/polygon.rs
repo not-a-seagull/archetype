@@ -1,7 +1,8 @@
 // GPLv3 License
 
 use super::{
-    rasterize_line, BezierCurve, Brush, DrawTarget, IntersectsAt, Line, Point, Rasterizable,
+    rasterize_thick_line, rasterize_thin_line, BezierCurve, Brush, DrawTarget, IntersectsAt, Line,
+    Point, Rasterizable,
 };
 use euclid::default::Point2D;
 use image::{Rgba, RgbaImage};
@@ -174,8 +175,6 @@ impl Polygon {
         let min_y = min_y.floor() as u32;
         let max_y = max_y.ceil() as u32;
 
-        let c = brush.color().into_rgba();
-
         (min_y..=max_y).into_par_iter().for_each(|y| {
             let y = y as f32;
             let line = LineSegment2F::from_x1_y1_x2_y2(min_x as f32, y, max_x as f32, y);
@@ -193,15 +192,12 @@ impl Polygon {
                 .step_by(2)
                 .zip(intersections.skip(1).step_by(2))
                 .for_each(|(pt1, pt2)| {
-                    let mut wlock = target.write();
-
                     let pt1: Point2D<f32> = pt1; // this makes the compiler happy
 
-                    imageproc::drawing::draw_line_segment_mut(
-                        &mut wlock.0,
-                        pt1.into_tuple(),
-                        pt2.into_tuple(),
-                        c,
+                    rasterize_thin_line(
+                        target,
+                        &(pt1.into_tuple(), pt2.into_tuple()),
+                        brush.clone(),
                     );
                 });
         });
@@ -214,7 +210,7 @@ impl Rasterizable for Polygon {
         match self.mode {
             PolygonType::Outline => {
                 self.as_straight_edges()
-                    .for_each(|l| l.rasterize(target, brush));
+                    .for_each(|l| l.rasterize(target, brush.clone()));
             }
             PolygonType::Fill => {
                 self.fill(target, brush);

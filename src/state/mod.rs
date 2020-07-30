@@ -1,9 +1,9 @@
 // GPL v3.0
 
-use super::{
-    colors, de_casteljau4, rasterize_line, BezierCurve, Brush, Color, DrawTarget, Project,
-    Rasterizable,
-};
+mod data;
+
+use super::{colors, de_casteljau4, BezierCurve, Brush, Color, DrawTarget, Project, Rasterizable};
+use data::*;
 use euclid::default::Point2D;
 use image::{Rgba, RgbaImage};
 use imageproc::drawing::{self, BresenhamLineIter, Canvas};
@@ -13,36 +13,39 @@ use pathfinder_geometry::{line_segment::LineSegment2F, vector::Vector2F};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::{collections::HashMap, mem};
-
-// repr of a line
-#[derive(Serialize, Deserialize)]
-struct Line {
-    points: [Point2D<f32>; 2],
-    brush: usize,
-}
+use std::{
+    collections::{HashMap, VecDeque},
+    mem,
+};
 
 /// The current graphical state.
 #[derive(Serialize, Deserialize)]
 pub struct GraphicalState {
-    curves: Vec<(BezierCurve, usize)>, // usize is brush index
-    buffered_lines: Vec<[Point2D<f32>; 2]>,
-    lines: Vec<Line>,
+    curves: Vec<Curve>, // usize is brush index
+    buffered_lines: Vec<BufferedLine>,
+    lines: Vec<StateLine>,
+    polygons: Vec<Polyshape>,
+    history: VecDeque<StateDataLoc>,
+    selected: Option<StateDataLoc>,
 }
 
 impl GraphicalState {
+    #[inline]
     pub fn new() -> Self {
         Self {
             curves: Vec::new(),
             buffered_lines: Vec::new(),
             lines: Vec::new(),
+            polygons: Vec::new(),
+            history: VecDeque::new(),
+            selected: None,
         }
     }
 
     /// Add a buffered line.
     #[inline]
     pub fn add_buffered_line(&mut self, pt1: Point2D<f32>, pt2: Point2D<f32>) {
-        self.buffered_lines.push([pt1, pt2]);
+        self.buffered_lines.push(BufferedLine([pt1, pt2]));
     }
 
     /// Drop the buffered lines.
@@ -57,7 +60,7 @@ impl GraphicalState {
         self.lines.extend(
             self.buffered_lines
                 .drain(..)
-                .map(|f| Line { points: f, brush }),
+                .map(|f| StateLine { points: f.0, brush }),
         );
     }
 
@@ -66,6 +69,7 @@ impl GraphicalState {
         let pts: Vec<Vector2F> = self
             .buffered_lines
             .drain(..)
+            .map(|bl| bl.0)
             .flat_map(|l| l.iter().copied().collect::<Vec<Point2D<f32>>>().into_iter())
             .map(|pt| Vector2F::new(pt.x, pt.y))
             //.sorted_by(|pt1, pt2| {
@@ -77,7 +81,7 @@ impl GraphicalState {
         self.curves.extend(
             BezierCurve::fit_to(&pts, error)
                 .into_iter()
-                .map(|v| (v, brush)),
+                .map(|v| Curve { curve: v, brush }),
         );
     }
 
@@ -106,20 +110,24 @@ impl GraphicalState {
         }
 
         // draw some curves
-        self.curves.par_iter().for_each(|(curve, ci)| {
-            // get the brush we are using
-            rasterize_item(target, curve, *ci, project);
-        });
+        self.curves
+            .par_iter()
+            .for_each(|Curve { curve, brush: ci }| {
+                // get the brush we are using
+                rasterize_item(target, curve, *ci, project);
+            });
 
         // also rasterize the line buffer
         self.buffered_lines.par_iter().for_each(|pts| {
             const BUFFERED_BRUSH: Brush = Brush::new(colors::RED, 3);
 
             let line = match pts {
-                [Point2D { x: x1, y: y1, .. }, Point2D { x: x2, y: y2, .. }] => LineSegment2F::new(
-                    Vector2F::new(*x1 as f32, *y1 as f32),
-                    Vector2F::new(*x2 as f32, *y2 as f32),
-                ),
+                BufferedLine([Point2D { x: x1, y: y1, .. }, Point2D { x: x2, y: y2, .. }]) => {
+                    LineSegment2F::new(
+                        Vector2F::new(*x1 as f32, *y1 as f32),
+                        Vector2F::new(*x2 as f32, *y2 as f32),
+                    )
+                }
             };
 
             line.rasterize(target, BUFFERED_BRUSH.clone());

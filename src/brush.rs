@@ -118,7 +118,7 @@ impl Brush {
     }
 
     #[inline]
-    pub fn color(&self) -> Color {
+    pub fn color(&self, _x: u32, _y: u32) -> Color {
         self.color
     }
 
