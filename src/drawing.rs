@@ -1,6 +1,6 @@
 // GPLv3 License
 
-use super::{Brush, DrawTarget, Line, TCImage};
+use super::{Brush, Color, DrawTarget, Line, LocationInfo, TCImage};
 use imageproc::drawing::{self, BresenhamLineIter, Canvas};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use rayon::prelude::*;
@@ -40,7 +40,12 @@ fn rasterize_thin_line_internal<Ln: Line<f32>>(
         c.draw_pixel(
             x as u32,
             y as u32,
-            brush.color(x as u32, y as u32).into_rgba(),
+            brush.color().as_rgba(&LocationInfo {
+                x: x as u32,
+                y: y as u32,
+                width,
+                height,
+            }),
         )
     });
 }

@@ -1,6 +1,6 @@
 // MIT License
 
-use super::Color;
+use super::{Color, DynamicColor, SolidColor};
 use smallvec::SmallVec;
 use std::io::{self, prelude::*};
 
@@ -32,7 +32,7 @@ pub fn interactive_yn(prompt: &str) -> bool {
     }
 }
 
-pub fn interactive_color(color_name: &str) -> Color {
+pub fn interactive_color(color_name: &str) -> DynamicColor {
     let si = io::stdin();
     let so = io::stdout();
 
@@ -66,7 +66,7 @@ pub fn interactive_color(color_name: &str) -> Color {
                 }};
             }
 
-            return unsafe { Color::new_unchecked(u8tof!(r), u8tof!(g), u8tof!(b)) };
+            return unsafe { SolidColor::new_unchecked(u8tof!(r), u8tof!(g), u8tof!(b)) }.into();
         }
     }
 }

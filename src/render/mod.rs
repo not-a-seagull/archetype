@@ -1,6 +1,6 @@
 // MIT License
 
-use super::{Color, DrawTarget, Project, TCImage};
+use super::{Color, DrawTarget, DynamicColor, Project, TCImage};
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use parking_lot::RwLock;
 
@@ -13,7 +13,7 @@ pub enum RenderTarget {
 #[derive(Copy, Clone)]
 pub enum AlphaMaskTarget<'a> {
     AlphaMask(&'a str),
-    Background(Color),
+    Background(DynamicColor),
 }
 
 impl RenderTarget {

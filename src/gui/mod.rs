@@ -2,7 +2,7 @@
 
 use super::{
     colors, render, AlphaMaskTarget, Brush, Color, ColorAtom, DrawTarget, GraphicalState,
-    RenderTarget, TCImage,
+    RenderTarget, SolidColor, TCImage,
 };
 use cairo::{Context, Format, ImageSurface};
 use gio::{prelude::*, ApplicationFlags};
@@ -466,7 +466,7 @@ Enter format: ";
 
         let mut alphaname = filename.clone();
         let am = if outtype.unwrap().is_single_image() {
-            AlphaMaskTarget::Background(unsafe { Color::new_unchecked(0.0, 0.0, 0.0) })
+            AlphaMaskTarget::Background(unsafe { SolidColor::new_unchecked(0.0, 0.0, 0.0) }.into())
         } else if crate::interactive_yn("Export an alpha mask alongside the final product?") {
             alphaname.push_str(".alpha");
             AlphaMaskTarget::AlphaMask(&alphaname)

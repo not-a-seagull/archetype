@@ -1,4 +1,4 @@
-// MIT License
+// GPLv3 License
 
 use super::{Gui, Project};
 use cairo::Context;
@@ -11,6 +11,8 @@ mod buffered;
 pub use buffered::{BufferedGuiMode, DEFAULT_ERROR};
 mod freedraw;
 pub use freedraw::*;
+mod select;
+pub use select::*;
 
 /// Various modes of GUI
 pub trait GuiMode {
@@ -39,12 +41,14 @@ pub enum GuiModeType {
     Switching,
     Buffered,
     Freedraw,
+    Select,
 }
 
 pub enum GuiModeStorage {
     Switching,
     Buffered(BufferedGuiMode),
     Freedraw(FreedrawGuiMode),
+    Select(SelectGuiMode),
 }
 
 impl GuiModeStorage {
@@ -54,6 +58,7 @@ impl GuiModeStorage {
             Self::Switching => return None,
             Self::Buffered(ref mut b) => b,
             Self::Freedraw(ref mut f) => f,
+            Self::Select(ref mut s) => s,
         })
     }
 
@@ -63,6 +68,7 @@ impl GuiModeStorage {
             Self::Switching => GuiModeType::Switching,
             Self::Buffered(_) => GuiModeType::Buffered,
             Self::Freedraw(_) => GuiModeType::Freedraw,
+            Self::Select(_) => GuiModeType::Select,
         }
     }
 }
@@ -91,6 +97,9 @@ impl GuiMode for GuiModeStorage {
                     'f' => gui
                         .take_matching_gui_mode(GuiModeType::Freedraw)
                         .unwrap_or_else(|| Self::Freedraw(FreedrawGuiMode::new())),
+                    's' => gui
+                        .take_matching_gui_mode(GuiModeType::Select)
+                        .unwrap_or_else(|| Self::Select(SelectGuiMode::new())),
                     _ => GuiModeStorage::Switching,
                 };
 

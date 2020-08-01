@@ -1,7 +1,9 @@
 // GPL v3.0
 
 #![allow(incomplete_features)]
+#![feature(const_fn)]
 #![feature(const_generics)]
+#![feature(specialization)]
 
 mod bezier;
 mod brush;
