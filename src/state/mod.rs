@@ -3,7 +3,7 @@
 mod data;
 
 use super::{
-    colors, de_casteljau4, BezierCurve, Brush, Color, DrawTarget, DynamicColor, Project,
+    colors, de_casteljau4, BezierCurve, Brush, Color, DrawTarget, DynamicColor, Point, Project,
     Rasterizable,
 };
 use data::*;
@@ -17,7 +17,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     mem,
 };
 
@@ -104,13 +104,15 @@ impl GraphicalState {
         self.unselect();
         let new_index = kind.assoc_collection(self).length();
         (new_index..new_index + item_num).into_iter().for_each(|i| {
-            self.history
-                .push(StateOperation::Add(StateDataLoc(kind, i)));
+            let data_loc = StateOperation::Add(StateDataLoc(kind, i));
+            self.history.push(data_loc);
         });
 
         while self.history.len() > HISTORY_LIMIT {
             self.history.remove(0);
         }
+
+        //println!("History: {:?}", &self.history);
     }
 
     /// Unselect all items
@@ -123,15 +125,20 @@ impl GraphicalState {
     #[inline]
     pub fn select_from_history(&mut self) {
         let new_index = if let Some(mut i) = self.last_history_selected.take() {
-            self.last_history_selected = Some(i + 1);
+            self.last_history_selected = Some(i.saturating_sub(1));
             i
         } else {
             let index = self.history.len() - 1;
-            self.last_history_selected = Some(index);
+            self.last_history_selected = Some(index - 1);
             index
         };
 
-        self.selected.push(match self.history[new_index] { StateOperation::Add(sl) => sl.clone()});
+        let data_loc = match self.history[new_index] {
+            StateOperation::Add(sl) => sl.clone(),
+        };
+        if !self.selected.contains(&data_loc) {
+            self.selected.push(data_loc);
+        }
     }
 
     /// Add a buffered line.
@@ -156,8 +163,8 @@ impl GraphicalState {
             .collect::<SmallVec<[StateLine; 10]>>();
 
         let len = lines.len();
-        self.lines.extend(lines);
         self.update_history_add(StateDataType::Line, len);
+        self.lines.extend(lines);
     }
 
     /// Convert the buffered items into a bezier curve.
@@ -176,9 +183,49 @@ impl GraphicalState {
             .collect::<SmallVec<[Curve; 10]>>();
         let len = curves.len();
 
-        self.curves.extend(curves);
-
         self.update_history_add(StateDataType::Curve, len);
+        self.curves.extend(curves);
+    }
+
+    /// Turn a set of beziers or lines into a polygon.
+    pub fn polygonify_selected_items(&mut self, create_new_line: bool, duplicate: bool) {}
+
+    /// Select the element closest to a click location.
+    pub fn select_closest_element<P: crate::Point<f32> + Sync>(&mut self, loc: P) {
+        // build a hash map of all of the lines and their associated data locations
+        // TODO: maybe cache this?
+        let point_map: Vec<(Point2D<f32>, usize, &(dyn DataObject + Sync + 'static))> = self
+            .iter_data_objects()
+            .flat_map(|(i, d)| {
+                d.points()
+                    .into_iter()
+                    .map(move |pt| (pt.into_euclid(), i, d))
+            })
+            .collect();
+        if !point_map.is_empty() {
+            let (_, index, item) = point_map
+                .par_iter()
+                .map(|(pt, i, d)| (pt.distance_to(&loc), i, d))
+                .min_by(|(dist1, _i1, _d1), (dist2, _i2, _d2)| {
+                    NotNan::new(*dist1)
+                        .unwrap()
+                        .cmp(&NotNan::new(*dist2).unwrap())
+                })
+                .unwrap();
+            self.selected.push(StateDataLoc(item.data_type(), *index));
+        }
+    }
+
+    /// Get an iterator over all data objects (except for buffered lines).
+    pub fn iter_data_objects(
+        &self,
+    ) -> impl Iterator<Item = (usize, &(dyn DataObject + Sync + 'static))> {
+        self.polygons
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, p as _))
+            .chain(self.curves.iter().enumerate().map(|(i, c)| (i, c as _)))
+            .chain(self.lines.iter().enumerate().map(|(i, l)| (i, l as _)))
     }
 
     /// Rasterize this graphical state onto an image.
@@ -186,6 +233,7 @@ impl GraphicalState {
         #[inline]
         fn rasterize_item(
             this: &GraphicalState,
+            data_type: StateDataType,
             index: usize,
             target: &DrawTarget,
             item: &dyn Rasterizable,
@@ -193,7 +241,7 @@ impl GraphicalState {
             project: &Project,
         ) {
             // figure out the item location
-            let data_loc = StateDataLoc(item.data_type(), index);
+            let data_loc = StateDataLoc(data_type, index);
 
             let brush = project.brush(ci).expect("Brush ID Mismatch").clone();
             let brush = if this.selected.contains(&data_loc) {
@@ -219,14 +267,46 @@ impl GraphicalState {
             mem::drop(img); // don't hog the lock
         }
 
+        self.polygons.par_iter().enumerate().for_each(|(i, pl)| {
+            rasterize_item(
+                self,
+                StateDataType::Polygon,
+                i,
+                target,
+                &pl.polygon,
+                pl.brush.clone(),
+                project,
+            );
+        });
+
         // draw some curves
         self.curves
             .par_iter()
             .enumerate()
             .for_each(|(i, Curve { curve, brush: ci })| {
                 // get the brush we are using
-                rasterize_item(self, i, target, curve, *ci, project);
+                rasterize_item(self, StateDataType::Curve, i, target, curve, *ci, project);
             });
+
+        // rasterize the lines
+        self.lines.par_iter().enumerate().for_each(|(i, ln)| {
+            let line = match ln.points {
+                [Point2D { x: x1, y: y1, .. }, Point2D { x: x2, y: y2, .. }] => LineSegment2F::new(
+                    Vector2F::new(x1 as f32, y1 as f32),
+                    Vector2F::new(x2 as f32, y2 as f32),
+                ),
+            };
+
+            rasterize_item(
+                self,
+                StateDataType::Line,
+                i,
+                target,
+                &line,
+                ln.brush,
+                project,
+            );
+        });
 
         // also rasterize the line buffer
         self.buffered_lines
@@ -246,21 +326,5 @@ impl GraphicalState {
 
                 line.rasterize(target, BUFFERED_BRUSH.clone());
             });
-
-        // rasterize the lines
-        self.lines.par_iter().enumerate().for_each(|(i, ln)| {
-            let line = match ln.points {
-                [Point2D { x: x1, y: y1, .. }, Point2D { x: x2, y: y2, .. }] => LineSegment2F::new(
-                    Vector2F::new(x1 as f32, y1 as f32),
-                    Vector2F::new(x2 as f32, y2 as f32),
-                ),
-            };
-
-            rasterize_item(self, i, target, &line, ln.brush, project);
-        });
-
-        self.polygons.par_iter().enumerate().for_each(|(i, pl)| {
-            rasterize_item(self, i, target, &pl.polygon, pl.brush.clone(), project);
-        });
     }
 }

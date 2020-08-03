@@ -3,9 +3,12 @@
 use super::GraphicalState as State;
 use crate::{BezierCurve, Brush, Polygon};
 use euclid::default::Point2D;
+use pathfinder_geometry::vector::Vector2F;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
+use std::iter;
 
-#[derive(PartialEq, Eq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
 pub enum StateDataType {
     Curve,
     Line,
@@ -35,7 +38,7 @@ impl StateDataType {
     }
 }
 
-#[derive(PartialEq, Eq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
 pub struct StateDataLoc(pub StateDataType, pub usize);
 
 impl StateDataLoc {
@@ -87,12 +90,21 @@ pub const HISTORY_LIMIT: usize = 45;
 /// A trait unifying every object that can be selected.
 pub trait DataObject {
     fn data_type(&self) -> StateDataType;
+    fn points(&self) -> SmallVec<[Vector2F; 4]>;
 }
 
 impl DataObject for StateLine {
     #[inline]
     fn data_type(&self) -> StateDataType {
         StateDataType::Line
+    }
+
+    #[inline]
+    fn points(&self) -> SmallVec<[Vector2F; 4]> {
+        self.points
+            .iter()
+            .map(|Point2D { x, y, .. }| Vector2F::new(*x, *y))
+            .collect()
     }
 }
 
@@ -101,6 +113,11 @@ impl DataObject for BufferedLine {
     fn data_type(&self) -> StateDataType {
         StateDataType::BufferedLine
     }
+
+    #[inline]
+    fn points(&self) -> SmallVec<[Vector2F; 4]> {
+        unimplemented!()
+    }
 }
 
 impl DataObject for Curve {
@@ -108,12 +125,28 @@ impl DataObject for Curve {
     fn data_type(&self) -> StateDataType {
         StateDataType::Curve
     }
+
+    #[inline]
+    fn points(&self) -> SmallVec<[Vector2F; 4]> {
+        self.curve
+            .edges()
+            .flat_map(|l| iter::once(l.from()).chain(iter::once(l.to())))
+            .collect()
+    }
 }
 
 impl DataObject for Polyshape {
     #[inline]
     fn data_type(&self) -> StateDataType {
         StateDataType::Polygon
+    }
+
+    #[inline]
+    fn points(&self) -> SmallVec<[Vector2F; 4]> {
+        self.polygon
+            .as_straight_edges()
+            .flat_map(|l| iter::once(l.from()).chain(iter::once(l.to())))
+            .collect()
     }
 }
 
@@ -151,7 +184,7 @@ impl<T: DataObject> DataObjectCollection for Vec<T> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StateOperation {
     Add(StateDataLoc),
 }

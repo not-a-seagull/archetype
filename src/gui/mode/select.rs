@@ -30,7 +30,11 @@ impl GuiMode for SelectGuiMode {
     fn key_press(&mut self, c: char, gui: &Gui) {
         match c {
             'h' => {
-                gui.project().write().current_frame_mut().select_from_history();
+                gui.project()
+                    .write()
+                    .current_frame_mut()
+                    .select_from_history();
+                self.mode = SelectionMode::History;
                 gui.update_image();
             }
             _ => (),

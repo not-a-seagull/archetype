@@ -77,7 +77,7 @@ pub fn build_ui(application: &Application, gui: Gui) {
 
         let gc = g5.clone();
         match evk.get_keyval().to_unicode() {
-            Some('s') => {
+            Some('s') if gc.gui_mode().lock().kind() != super::GuiModeType::Switching => {
                 if let Err(e) = gc.save_project(
                     evk.get_state() & ModifierType::SHIFT_MASK != ModifierType::empty(),
                 ) {

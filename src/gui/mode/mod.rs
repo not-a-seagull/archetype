@@ -36,7 +36,7 @@ pub trait GuiMode {
     fn draw(&mut self, _gui: &Gui, _context: &Context) {}
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GuiModeType {
     Switching,
     Buffered,
@@ -105,6 +105,7 @@ impl GuiMode for GuiModeStorage {
 
                 new_mode.switch_in(gui);
                 *self = new_mode;
+                println!("Switching to {:?} mode", self.kind());
             }
         }
     }
