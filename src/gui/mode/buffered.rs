@@ -65,7 +65,7 @@ impl GuiMode for BufferedGuiMode {
                 mem::drop(pr);
                 gui.update_image();
             }
-            'e' => {
+            't' => {
                 self.error += 1.0;
                 println!("Error is {}", self.error);
             }

@@ -1,15 +1,16 @@
 // GPLv3 License
 
 use euclid::{Point2D, Rect};
-use num_traits::{Float, Num, Pow, Zero};
+use num_traits::{AsPrimitive, Float, Num, Pow, Signed, Zero};
 use pathfinder_geometry::{
     line_segment::LineSegment2F,
     vector::{Vector2F, Vector2I},
 };
+use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
-    cmp,
-    ops::{Mul, Sub},
+    cmp, iter,
+    ops::{Add, Div, Mul, Neg, Sub},
 };
 
 pub trait PathfinderVector<T: Copy>: Point<T> {}
@@ -175,6 +176,60 @@ pub trait Line<T: Copy>: Copy {
     fn from_points<Pt1: Point<T>, Pt2: Point<T>>(pt1: Pt1, pt2: Pt2) -> Self {
         Self::from_x1_y1_x2_y2(pt1.x(), pt1.y(), pt2.x(), pt2.y())
     }
+    #[inline]
+    fn fit_to_points<Pt: Point<T>>(points: &[Pt]) -> Self
+    where
+        Pt: Sync,
+        T: Add<Output = T>
+            + Sub<Output = T>
+            + Mul<Output = T>
+            + Div<Output = T>
+            + Send
+            + Sync
+            + PartialOrd
+            + Zero
+            + 'static,
+        usize: AsPrimitive<T>,
+    {
+        assert!(points.len() != 0);
+
+        // get sums of x, y, x*y, and x^2
+        let (x, y, xy, x2) = points
+            .par_iter()
+            .map(|pt| (pt.x(), pt.y(), pt.x().mul(pt.y()), pt.x().mul(pt.x())))
+            .reduce(
+                || (T::zero(), T::zero(), T::zero(), T::zero()),
+                |(xs, ys, xys, x2s), (x, y, xy, x2)| (xs + x, ys + y, xys + xy, x2s + x2),
+            );
+
+        // figure out slope and y-intercept
+        let n: T = points.len().as_();
+        let m = ((n * xy) - (x * y)) / ((n * x2) - (x * x));
+        let c = (y - (m * x)) / n;
+
+        // figure out what the X is for the lowest and highest Y
+        let pt_y_iter = points.par_iter().map(Point::<T>::y);
+
+        #[inline]
+        fn compare<T: PartialOrd>(t1: &T, t2: &T) -> std::cmp::Ordering {
+            t1.partial_cmp(t2).unwrap()
+        }
+
+        let min_y = pt_y_iter.clone().min_by(compare).unwrap();
+        let max_y = pt_y_iter.max_by(compare).unwrap();
+
+        // figure out, through the reverse process, where the x's are
+        // y = m*x + c, y - c = m*x, (y - c)/m = x
+        #[inline]
+        fn y_to_x<T: PartialOrd + Sub<Output = T> + Div<Output = T>>(y: T, m: T, c: T) -> T {
+            (y - c) / m
+        }
+
+        let min_x = y_to_x(min_y, m, c);
+        let max_x = y_to_x(max_y, m, c);
+
+        Self::from_x1_y1_x2_y2(min_x, min_y, max_x, max_y)
+    }
 
     #[inline]
     fn length(&self) -> T
@@ -182,6 +237,49 @@ pub trait Line<T: Copy>: Copy {
         T: Pow<i32, Output = T> + Float + Sub,
     {
         self.to::<(T, T)>().distance_to(&self.from::<(T, T)>())
+    }
+
+    #[inline]
+    fn slope(&self) -> T
+    where
+        T: Sub<Output = T> + Div<Output = T>,
+    {
+        (self.to_y() - self.from_y()) / (self.to_x() - self.from_x())
+    }
+
+    #[inline]
+    fn y_intercept(&self) -> T
+    where
+        T: Sub<Output = T> + Mul<Output = T> + Div<Output = T>,
+    {
+        // y = mx + b
+        // -b = mx - y
+        // b = y - mx
+        (self.to_y().sub(self.slope().mul(self.to_x())))
+    }
+
+    #[inline]
+    fn distance_to_point<Pt: Point<T>>(&self, pt: &Pt) -> T
+    where
+        T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T> + Float,
+    {
+        let a = self.from_y() - self.to_y();
+        let b = self.to_x() - self.from_x();
+        let c = (self.from_x() * self.to_y()) - (self.to_x() * self.from_y());
+
+        // dist = abs(a * x + b * x + c) / sqrt(a * a + b * b);
+        let p1 = (a * pt.x()) + (b * pt.x()) + c;
+        a.abs() / (((a * a) + (b * b)).sqrt())
+    }
+
+    #[inline]
+    fn closest_point<PtIn: Point<T>, PtOut: Point<T>>(&self, pt: &PtIn) -> PtOut
+    where
+        T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Float + Pow<i32, Output = T>,
+    {
+        let a_to_b = (self.to_x() - self.from_x(), self.to_y() - self.from_y());
+        let dist = self.from::<(T, T)>().distance_to(pt);
+        PtOut::from_x_y(dist * a_to_b.0, dist * a_to_b.1)
     }
 
     /*
@@ -257,6 +355,11 @@ pub trait IntersectsAt: Line<f32> {
         let r: Vector2F =
             LineSegment2F::new(self.to::<Vector2F>(), self.from::<Vector2F>()).sample(t);
         Res::from_x_y(r.x(), r.y())
+    }
+
+    #[inline]
+    fn point_t<Pt: Point<f32>>(&self, pt: &Pt) -> f32 {
+        LineSegment2F::new(self.to::<Vector2F>(), self.from::<Vector2F>()).solve_t_for_x(pt.x())
     }
 }
 

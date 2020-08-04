@@ -1,11 +1,13 @@
 // GPL v3.0
 
-use super::{Brush, DrawTarget, Point, Rasterizable};
+use super::{Brush, DrawTarget, IntersectsAt, Line, Point, Rasterizable};
+use ordered_float::NotNan;
 use parking_lot::RwLock;
 use pathfinder_geometry::{line_segment::LineSegment2F, vector::Vector2F};
+use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
-use std::{mem, ops::Range};
+use std::{convert::TryInto, mem, ops::Range};
 
 mod fit;
 
@@ -62,8 +64,21 @@ impl BezierCurve {
     }
 
     #[inline]
-    pub fn fit_to(points: &[Vector2F], error: f32) -> Vec<Self> {
-        fit::fit_curve(points, error).unwrap()
+    pub fn fit_to(mut points: SmallVec<[Vector2F; 12]>, error: f32) -> Vec<Self> {
+        // fit points to a line
+        /*let line = LineSegment2F::fit_to_points(&points);
+        points.par_sort_by(move |p1, p2| {
+            #[inline]
+            fn line_equiv_t(ln: LineSegment2F, p: &Vector2F) -> NotNan<f32> {
+                ln.point_t(&ln.closest_point::<_, Vector2F>(p)).try_into().expect("Found unexpected NaN")
+            }
+
+            let t1 = line_equiv_t(line, p1);
+            let t2 = line_equiv_t(line, p2);
+            t1.cmp(&t2)
+        });*/
+
+        fit::fit_curve(&points, error).unwrap()
     }
 
     #[inline]

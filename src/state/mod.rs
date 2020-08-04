@@ -28,7 +28,7 @@ pub struct GraphicalState {
     buffered_lines: Vec<BufferedLine>,
     lines: Vec<StateLine>,
     polygons: Vec<Polyshape>,
-    history: SmallVec<[StateOperation; 25]>,
+    history: Vec<StateOperation>,
 
     selected: Vec<StateDataLoc>,
     last_history_selected: Option<usize>,
@@ -42,7 +42,7 @@ impl GraphicalState {
             buffered_lines: Vec::new(),
             lines: Vec::new(),
             polygons: Vec::new(),
-            history: SmallVec::new(),
+            history: Vec::new(),
             selected: Vec::new(),
             last_history_selected: None,
         }
@@ -103,10 +103,11 @@ impl GraphicalState {
     pub fn update_history_add(&mut self, kind: StateDataType, item_num: usize) {
         self.unselect();
         let new_index = kind.assoc_collection(self).length();
-        (new_index..new_index + item_num).into_iter().for_each(|i| {
-            let data_loc = StateOperation::Add(StateDataLoc(kind, i));
-            self.history.push(data_loc);
-        });
+        self.history.par_extend(
+            (new_index..new_index + item_num)
+                .into_par_iter()
+                .map(|i| StateOperation::Add(StateDataLoc(kind, i))),
+        );
 
         while self.history.len() > HISTORY_LIMIT {
             self.history.remove(0);
@@ -173,11 +174,16 @@ impl GraphicalState {
             .buffered_lines
             .drain(..)
             .map(|bl| bl.0)
-            .flat_map(|l| l.iter().copied().collect::<Vec<Point2D<f32>>>().into_iter())
+            .flat_map(|l| {
+                l.par_iter()
+                    .copied()
+                    .collect::<Vec<Point2D<f32>>>()
+                    .into_iter()
+            })
             .map(|pt| Vector2F::new(pt.x, pt.y))
             .collect();
 
-        let curves = BezierCurve::fit_to(&pts, error)
+        let curves = BezierCurve::fit_to(pts, error)
             .into_iter()
             .map(|v| Curve { curve: v, brush })
             .collect::<SmallVec<[Curve; 10]>>();
@@ -192,7 +198,7 @@ impl GraphicalState {
 
     /// Select the element closest to a click location.
     pub fn select_closest_element<P: crate::Point<f32> + Sync>(&mut self, loc: P) {
-        // build a hash map of all of the lines and their associated data locations
+        // build a map of all of the lines and their associated data locations
         // TODO: maybe cache this?
         let point_map: Vec<(Point2D<f32>, usize, &(dyn DataObject + Sync + 'static))> = self
             .iter_data_objects()
@@ -202,16 +208,31 @@ impl GraphicalState {
                     .map(move |pt| (pt.into_euclid(), i, d))
             })
             .collect();
-        if !point_map.is_empty() {
-            let (_, index, item) = point_map
+
+        if point_map.len() > 0 {
+            let (_, index, item) = if let Some(i) = point_map
                 .par_iter()
                 .map(|(pt, i, d)| (pt.distance_to(&loc), i, d))
+                .filter(|(dist, i, d)| {
+                    !self.selected.contains(&StateDataLoc(d.data_type(), **i)) && !dist.is_nan()
+                })
                 .min_by(|(dist1, _i1, _d1), (dist2, _i2, _d2)| {
                     NotNan::new(*dist1)
                         .unwrap()
                         .cmp(&NotNan::new(*dist2).unwrap())
-                })
-                .unwrap();
+                }) {
+                i
+            } else {
+                println!("No minimum identified");
+                return;
+            };
+
+            println!(
+                "Found index {:?} and item of type {:?}",
+                index,
+                item.data_type()
+            );
+
             self.selected.push(StateDataLoc(item.data_type(), *index));
         }
     }
