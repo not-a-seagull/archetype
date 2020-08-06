@@ -3,15 +3,16 @@
 mod data;
 
 use super::{
-    colors, de_casteljau4, BezierCurve, Brush, Color, DrawTarget, DynamicColor, Point, Project,
-    Rasterizable,
+    colors, de_casteljau4, BezierCurve, Brush, Color, DrawTarget, DynamicColor, Line, Point,
+    Polygon, PolygonEdge, PolygonType, Project, Rasterizable,
 };
 use data::*;
 use euclid::default::Point2D;
 use image::{Rgba, RgbaImage};
 use imageproc::drawing::{self, BresenhamLineIter, Canvas};
+use itertools::Itertools;
 use ordered_float::NotNan;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
 use pathfinder_geometry::{line_segment::LineSegment2F, vector::Vector2F};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -30,7 +31,7 @@ pub struct GraphicalState {
     polygons: Vec<Polyshape>,
     history: Vec<StateOperation>,
 
-    selected: Vec<StateDataLoc>,
+    selected: RwLock<Vec<StateDataLoc>>,
     last_history_selected: Option<usize>,
 }
 
@@ -43,7 +44,7 @@ impl GraphicalState {
             lines: Vec::new(),
             polygons: Vec::new(),
             history: Vec::new(),
-            selected: Vec::new(),
+            selected: RwLock::new(Vec::new()),
             last_history_selected: None,
         }
     }
@@ -93,14 +94,13 @@ impl GraphicalState {
         &self.history
     }
 
-    #[inline]
-    pub fn selected(&self) -> &[StateDataLoc] {
-        &self.selected
-    }
-
     /// Update the history to go below the history limit.
     #[inline]
     pub fn update_history_add(&mut self, kind: StateDataType, item_num: usize) {
+        if item_num == 0 {
+            return;
+        }
+
         self.unselect();
         let new_index = kind.assoc_collection(self).length();
         self.history.par_extend(
@@ -112,14 +112,25 @@ impl GraphicalState {
         while self.history.len() > HISTORY_LIMIT {
             self.history.remove(0);
         }
-
-        //println!("History: {:?}", &self.history);
     }
 
     /// Unselect all items
     #[inline]
-    pub fn unselect(&mut self) {
-        self.selected.clear();
+    pub fn unselect(&self) {
+        self.selected.write().clear();
+    }
+
+    /// Delete all selected items.
+    #[inline]
+    pub fn delete_selected(&mut self) {
+        self.history.clear();
+        let mut sel = self.selected.write();
+        let items: SmallVec<[StateDataLoc; 12]> = sel.drain(..).sorted().collect();
+        mem::drop(sel);
+        items.into_iter().rev().for_each(|StateDataLoc(ty, i)| {
+            ty.assoc_collection_mut(self).remove(i); // since we're going backwards, there shouldn't be
+                                                     // many adverse side effects
+        });
     }
 
     /// Push an item from the history into the selected item.
@@ -137,8 +148,10 @@ impl GraphicalState {
         let data_loc = match self.history[new_index] {
             StateOperation::Add(sl) => sl.clone(),
         };
-        if !self.selected.contains(&data_loc) {
-            self.selected.push(data_loc);
+
+        let mut sel = self.selected.write();
+        if !sel.contains(&data_loc) {
+            sel.push(data_loc);
         }
     }
 
@@ -194,7 +207,190 @@ impl GraphicalState {
     }
 
     /// Turn a set of beziers or lines into a polygon.
-    pub fn polygonify_selected_items(&mut self, create_new_line: bool, duplicate: bool) {}
+    pub fn polygonify_selected_items(
+        &mut self,
+        brush: usize,
+        create_new_line: bool,
+        duplicate: bool,
+    ) {
+        trait HasEndPoints {
+            fn endpoint1(&self) -> Vector2F;
+            fn endpoint2(&self) -> Vector2F;
+            fn set_endpoint1(&mut self, vctr: Vector2F);
+            fn set_endpoint2(&mut self, vctr: Vector2F);
+        }
+
+        impl HasEndPoints for BezierCurve {
+            #[inline]
+            fn endpoint1(&self) -> Vector2F {
+                self.points()[0]
+            }
+            #[inline]
+            fn endpoint2(&self) -> Vector2F {
+                self.points()[3]
+            }
+            #[inline]
+            fn set_endpoint1(&mut self, vctr: Vector2F) {
+                self.points_mut()[0] = vctr;
+            }
+            #[inline]
+            fn set_endpoint2(&mut self, vctr: Vector2F) {
+                self.points_mut()[3] = vctr;
+            }
+        }
+
+        impl<Ln: Line<f32>> HasEndPoints for Ln {
+            #[inline]
+            fn endpoint1(&self) -> Vector2F {
+                self.from()
+            }
+            #[inline]
+            fn endpoint2(&self) -> Vector2F {
+                self.to()
+            }
+            #[inline]
+            fn set_endpoint1(&mut self, vctr: Vector2F) {
+                self.set_from(vctr);
+            }
+            #[inline]
+            fn set_endpoint2(&mut self, vctr: Vector2F) {
+                self.set_to(vctr);
+            }
+        }
+
+        impl HasEndPoints for DataObjectContainer {
+            #[inline]
+            fn endpoint1(&self) -> Vector2F {
+                match self {
+                    Self::Curve(Curve { ref curve, .. }) => curve.endpoint1(),
+                    Self::StateLine(StateLine { ref points, .. }) => points.endpoint1(),
+                    _ => unreachable!(),
+                }
+            }
+
+            #[inline]
+            fn endpoint2(&self) -> Vector2F {
+                match self {
+                    Self::Curve(Curve { ref curve, .. }) => curve.endpoint2(),
+                    Self::StateLine(StateLine { ref points, .. }) => points.endpoint2(),
+                    _ => unreachable!(),
+                }
+            }
+
+            #[inline]
+            fn set_endpoint1(&mut self, val: Vector2F) {
+                match self {
+                    Self::Curve(Curve { ref mut curve, .. }) => curve.set_endpoint1(val),
+                    Self::StateLine(StateLine { ref mut points, .. }) => points.set_endpoint1(val),
+                    _ => unreachable!(),
+                }
+            }
+
+            #[inline]
+            fn set_endpoint2(&mut self, val: Vector2F) {
+                match self {
+                    Self::Curve(Curve { ref mut curve, .. }) => curve.set_endpoint2(val),
+                    Self::StateLine(StateLine { ref mut points, .. }) => points.set_endpoint2(val),
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        #[inline]
+        fn connect_endpoints(
+            t1: &mut dyn HasEndPoints,
+            t2: &mut dyn HasEndPoints,
+            create_new_line: bool,
+            new_lines: &mut SmallVec<[[Point2D<f32>; 2]; 2]>,
+        ) {
+            const TOLERANCE: f32 = 2.0;
+
+            // if we're creating a new line OR we're in tolerance range, set the two endpoints to be the same
+            let (pt1, pt2) = (t1.endpoint2(), t2.endpoint1());
+            let dist = pt1.distance_to(&pt2);
+
+            if !create_new_line || dist < TOLERANCE {
+                let (avg_x, avg_y) = ((pt1.x() + pt2.x()) / 2.0, (pt1.y() + pt2.y()) / 2.0);
+                let avg = Vector2F::new(avg_x, avg_y);
+
+                t1.set_endpoint2(avg);
+                t2.set_endpoint1(avg);
+            } else {
+                let line = [pt1.into_euclid(), pt2.into_euclid()];
+                new_lines.push(line);
+            }
+        }
+
+        let mut sel = self.selected.write();
+        let locs: SmallVec<[StateDataLoc; 12]> = sel.drain(..).collect();
+        mem::drop(sel);
+        let lines: Option<SmallVec<[DataObjectContainer; 12]>> = locs
+            .into_iter()
+            .rev()
+            .map(|s| {
+                if let StateDataType::Line | StateDataType::Curve = s.0 {
+                    Some(if duplicate {
+                        s.item(self).clone_into_container()
+                    } else {
+                        s.take_item(self)
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut new_lines = SmallVec::new();
+        match lines {
+            None => {
+                println!("Found a non-line element in the selection.");
+            }
+            Some(mut sm) => {
+                for i in 1..=sm.len() {
+                    let (i1, i2) = if i == sm.len() {
+                        (sm.len() - 1, 0)
+                    } else {
+                        (i - 1, i)
+                    };
+                    let (mut d1, mut d2) = (sm[i1].clone(), sm[i2].clone());
+
+                    connect_endpoints(&mut d1, &mut d2, create_new_line, &mut new_lines);
+
+                    sm[i1] = d1;
+                    sm[i2] = d2;
+                }
+
+                let poly = Polygon::new(
+                    sm.into_iter()
+                        .map(|d| match d {
+                            DataObjectContainer::StateLine(StateLine { points, .. }) => {
+                                points.into()
+                            }
+                            DataObjectContainer::Curve(Curve { curve, .. }) => curve.into(),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Vec<PolygonEdge>>(),
+                    PolygonType::Outline,
+                );
+                let poly = Polyshape {
+                    polygon: poly,
+                    brush,
+                };
+                self.history.push(StateOperation::Add(StateDataLoc(
+                    StateDataType::Polygon,
+                    self.polygons.len(),
+                )));
+                self.polygons.push(poly);
+
+                self.update_history_add(StateDataType::Line, new_lines.len());
+                self.lines.extend(
+                    new_lines
+                        .into_iter()
+                        .map(|l| StateLine { points: l, brush }),
+                );
+            }
+        }
+    }
 
     /// Select the element closest to a click location.
     pub fn select_closest_element<P: crate::Point<f32> + Sync>(&mut self, loc: P) {
@@ -210,11 +406,13 @@ impl GraphicalState {
             .collect();
 
         if point_map.len() > 0 {
+            let sel = RwLock::upgradable_read(&self.selected);
+
             let (_, index, item) = if let Some(i) = point_map
                 .par_iter()
                 .map(|(pt, i, d)| (pt.distance_to(&loc), i, d))
                 .filter(|(dist, i, d)| {
-                    !self.selected.contains(&StateDataLoc(d.data_type(), **i)) && !dist.is_nan()
+                    !sel.contains(&StateDataLoc(d.data_type(), **i)) && !dist.is_nan()
                 })
                 .min_by(|(dist1, _i1, _d1), (dist2, _i2, _d2)| {
                     NotNan::new(*dist1)
@@ -233,7 +431,8 @@ impl GraphicalState {
                 item.data_type()
             );
 
-            self.selected.push(StateDataLoc(item.data_type(), *index));
+            let mut sel = RwLockUpgradableReadGuard::upgrade(sel);
+            sel.push(StateDataLoc(item.data_type(), *index));
         }
     }
 
@@ -254,6 +453,7 @@ impl GraphicalState {
         #[inline]
         fn rasterize_item(
             this: &GraphicalState,
+            sel_guard: &RwLockReadGuard<'_, Vec<StateDataLoc>>,
             data_type: StateDataType,
             index: usize,
             target: &DrawTarget,
@@ -265,7 +465,7 @@ impl GraphicalState {
             let data_loc = StateDataLoc(data_type, index);
 
             let brush = project.brush(ci).expect("Brush ID Mismatch").clone();
-            let brush = if this.selected.contains(&data_loc) {
+            let brush = if sel_guard.contains(&data_loc) {
                 const SELECT_BRUSH: Brush = Brush::new_const(DynamicColor::Solid(colors::BLUE), 0);
                 let mut select_brush = SELECT_BRUSH.clone();
                 select_brush.set_width(brush.width());
@@ -278,6 +478,7 @@ impl GraphicalState {
         }
 
         let img = RwLock::upgradable_read(target);
+        let sel = self.selected.read();
 
         // update the bool if necessary
         if !img.1 {
@@ -291,6 +492,7 @@ impl GraphicalState {
         self.polygons.par_iter().enumerate().for_each(|(i, pl)| {
             rasterize_item(
                 self,
+                &sel,
                 StateDataType::Polygon,
                 i,
                 target,
@@ -306,7 +508,16 @@ impl GraphicalState {
             .enumerate()
             .for_each(|(i, Curve { curve, brush: ci })| {
                 // get the brush we are using
-                rasterize_item(self, StateDataType::Curve, i, target, curve, *ci, project);
+                rasterize_item(
+                    self,
+                    &sel,
+                    StateDataType::Curve,
+                    i,
+                    target,
+                    curve,
+                    *ci,
+                    project,
+                );
             });
 
         // rasterize the lines
@@ -320,6 +531,7 @@ impl GraphicalState {
 
             rasterize_item(
                 self,
+                &sel,
                 StateDataType::Line,
                 i,
                 target,

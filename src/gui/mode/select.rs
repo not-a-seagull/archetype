@@ -38,9 +38,14 @@ impl GuiMode for SelectGuiMode {
                 self.mode = SelectionMode::History;
                 gui.update_image();
             }
-            'd' => {
+            'u' => {
                 self.mode = SelectionMode::NoSelection;
                 gui.project().write().current_frame_mut().unselect();
+                gui.update_image();
+            }
+            'd' => {
+                self.mode = SelectionMode::NoSelection;
+                gui.project().write().current_frame_mut().delete_selected();
                 gui.update_image();
             }
             _ => (),

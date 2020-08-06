@@ -1,12 +1,16 @@
 // GPLv3 License
 
 use super::GraphicalState as State;
-use crate::{BezierCurve, Brush, Polygon};
+use crate::{BezierCurve, Brush, Line, Polygon};
 use euclid::default::Point2D;
 use pathfinder_geometry::vector::Vector2F;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::iter;
+use std::{
+    any::{Any, TypeId},
+    boxed::Box,
+    iter,
+};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
 pub enum StateDataType {
@@ -57,10 +61,15 @@ impl StateDataLoc {
             .data_at_mut(self.1)
             .expect("Data location refers to data that does not exist")
     }
+
+    #[inline]
+    pub fn take_item(self, state: &mut State) -> DataObjectContainer {
+        self.0.assoc_collection_mut(state).remove(self.1)
+    }
 }
 
 // repr of a line
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StateLine {
     pub points: [Point2D<f32>; 2],
     pub brush: usize,
@@ -68,21 +77,34 @@ pub struct StateLine {
 
 // repr of a buffered line
 #[repr(transparent)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BufferedLine(pub [Point2D<f32>; 2]);
 
 // repr of a bezier curve
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Curve {
     pub curve: BezierCurve,
     pub brush: usize,
 }
 
 // repr of a polygon
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Polyshape {
     pub polygon: Polygon,
     pub brush: usize,
+}
+
+#[inline]
+fn line_to_points<Ln: Line<f32>>(line: &Ln) -> SmallVec<[Vector2F; 4]> {
+    const POINT_SKIP: usize = 8;
+    let line_iter = imageproc::drawing::BresenhamLineIter::new(
+        (line.from_x(), line.from_y()),
+        (line.to_x(), line.to_y()),
+    );
+    line_iter
+        .step_by(POINT_SKIP)
+        .map(|(x, y)| Vector2F::new(x as f32, y as f32))
+        .collect()
 }
 
 pub const HISTORY_LIMIT: usize = 45;
@@ -91,6 +113,8 @@ pub const HISTORY_LIMIT: usize = 45;
 pub trait DataObject {
     fn data_type(&self) -> StateDataType;
     fn points(&self) -> SmallVec<[Vector2F; 4]>;
+    fn into_container(self) -> DataObjectContainer;
+    fn clone_into_container(&self) -> DataObjectContainer;
 }
 
 impl DataObject for StateLine {
@@ -101,10 +125,17 @@ impl DataObject for StateLine {
 
     #[inline]
     fn points(&self) -> SmallVec<[Vector2F; 4]> {
-        self.points
-            .iter()
-            .map(|Point2D { x, y, .. }| Vector2F::new(*x, *y))
-            .collect()
+        line_to_points(&self.points)
+    }
+
+    #[inline]
+    fn into_container(self) -> DataObjectContainer {
+        DataObjectContainer::StateLine(self)
+    }
+
+    #[inline]
+    fn clone_into_container(&self) -> DataObjectContainer {
+        self.clone().into_container()
     }
 }
 
@@ -118,6 +149,16 @@ impl DataObject for BufferedLine {
     fn points(&self) -> SmallVec<[Vector2F; 4]> {
         unimplemented!()
     }
+
+    #[inline]
+    fn into_container(self) -> DataObjectContainer {
+        DataObjectContainer::BufferedLine(self)
+    }
+
+    #[inline]
+    fn clone_into_container(&self) -> DataObjectContainer {
+        self.clone().into_container()
+    }
 }
 
 impl DataObject for Curve {
@@ -130,8 +171,18 @@ impl DataObject for Curve {
     fn points(&self) -> SmallVec<[Vector2F; 4]> {
         self.curve
             .edges()
-            .flat_map(|l| iter::once(l.from()).chain(iter::once(l.to())))
+            .flat_map(|l| line_to_points(&l))
             .collect()
+    }
+
+    #[inline]
+    fn into_container(self) -> DataObjectContainer {
+        DataObjectContainer::Curve(self)
+    }
+
+    #[inline]
+    fn clone_into_container(&self) -> DataObjectContainer {
+        self.clone().into_container()
     }
 }
 
@@ -145,8 +196,39 @@ impl DataObject for Polyshape {
     fn points(&self) -> SmallVec<[Vector2F; 4]> {
         self.polygon
             .as_straight_edges()
-            .flat_map(|l| iter::once(l.from()).chain(iter::once(l.to())))
+            .flat_map(|l| line_to_points(&l))
             .collect()
+    }
+
+    #[inline]
+    fn into_container(self) -> DataObjectContainer {
+        DataObjectContainer::Polyshape(self)
+    }
+
+    #[inline]
+    fn clone_into_container(&self) -> DataObjectContainer {
+        self.clone().into_container()
+    }
+}
+
+/// Stack-based container for select data objects.
+#[derive(Clone, Serialize, Deserialize)]
+pub enum DataObjectContainer {
+    Curve(Curve),
+    StateLine(StateLine),
+    BufferedLine(BufferedLine),
+    Polyshape(Polyshape),
+}
+
+impl DataObjectContainer {
+    #[inline]
+    pub fn into_boxed_any(self) -> Box<dyn Any + 'static> {
+        match self {
+            Self::Curve(c) => Box::new(c),
+            Self::StateLine(s) => Box::new(s),
+            Self::BufferedLine(bl) => Box::new(bl),
+            Self::Polyshape(p) => Box::new(p),
+        }
     }
 }
 
@@ -159,9 +241,11 @@ pub trait DataObjectCollection {
     fn data_at(&self, index: usize) -> Option<&dyn DataObject>;
     fn data_at_mut(&mut self, index: usize) -> Option<&mut dyn DataObject>;
     fn length(&self) -> usize;
+    fn remove(&mut self, index: usize) -> DataObjectContainer;
+    fn insert(&mut self, index: usize, item: DataObjectContainer);
 }
 
-impl<T: DataObject> DataObjectCollection for Vec<T> {
+impl<T: DataObject + 'static> DataObjectCollection for Vec<T> {
     #[inline]
     fn length(&self) -> usize {
         self.len()
@@ -180,6 +264,19 @@ impl<T: DataObject> DataObjectCollection for Vec<T> {
         match self.get_mut(index) {
             Some(r) => Some(r),
             None => None,
+        }
+    }
+
+    #[inline]
+    fn remove(&mut self, index: usize) -> DataObjectContainer {
+        self.remove(index).into_container()
+    }
+
+    #[inline]
+    fn insert(&mut self, index: usize, item: DataObjectContainer) {
+        match item.into_boxed_any().downcast::<T>() {
+            Ok(b) => self.insert(index, *b),
+            _ => panic!("Attempted to insert invalid object into data object collection"),
         }
     }
 }

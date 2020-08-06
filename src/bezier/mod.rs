@@ -104,6 +104,11 @@ impl BezierCurve {
     }
 
     #[inline]
+    pub fn points_mut(&mut self) -> &mut [Vector2F; 4] {
+        &mut self.points
+    }
+
+    #[inline]
     pub fn edges(&self) -> Edges<'_> {
         let [start, control_a, control_b, end] = self.points();
 

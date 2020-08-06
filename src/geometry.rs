@@ -161,6 +161,10 @@ pub trait Line<T: Copy>: Copy {
     fn from_x(&self) -> T;
     fn to_y(&self) -> T;
     fn from_y(&self) -> T;
+    fn set_to_x(&mut self, val: T);
+    fn set_from_x(&mut self, val: T);
+    fn set_to_y(&mut self, val: T);
+    fn set_from_y(&mut self, val: T);
 
     #[inline]
     fn to<Pt: Point<T>>(&self) -> Pt {
@@ -169,6 +173,16 @@ pub trait Line<T: Copy>: Copy {
     #[inline]
     fn from<Pt: Point<T>>(&self) -> Pt {
         Pt::from_x_y(self.from_x(), self.from_y())
+    }
+    #[inline]
+    fn set_to<Pt: Point<T>>(&mut self, pt: Pt) {
+        self.set_to_x(pt.x());
+        self.set_to_y(pt.y());
+    }
+    #[inline]
+    fn set_from<Pt: Point<T>>(&mut self, pt: Pt) {
+        self.set_from_x(pt.x());
+        self.set_from_y(pt.y());
     }
 
     fn from_x1_y1_x2_y2(x1: T, y1: T, x2: T, y2: T) -> Self;
@@ -383,8 +397,63 @@ impl<T: Copy, Dim> Line<T> for (Point2D<T, Dim>, Point2D<T, Dim>) {
         self.0.y
     }
     #[inline]
+    fn set_to_x(&mut self, val: T) {
+        self.1.x = val;
+    }
+    #[inline]
+    fn set_from_x(&mut self, val: T) {
+        self.0.x = val;
+    }
+    #[inline]
+    fn set_to_y(&mut self, val: T) {
+        self.1.y = val;
+    }
+    #[inline]
+    fn set_from_y(&mut self, val: T) {
+        self.0.y = val;
+    }
+    #[inline]
     fn from_x1_y1_x2_y2(x1: T, y1: T, x2: T, y2: T) -> Self {
         (euclid::point2(x1, y1), euclid::point2(x2, y2))
+    }
+}
+
+impl<T: Copy, Dim> Line<T> for [Point2D<T, Dim>; 2] {
+    #[inline]
+    fn to_x(&self) -> T {
+        self[1].x
+    }
+    #[inline]
+    fn from_x(&self) -> T {
+        self[0].x
+    }
+    #[inline]
+    fn to_y(&self) -> T {
+        self[1].y
+    }
+    #[inline]
+    fn from_y(&self) -> T {
+        self[0].y
+    }
+    #[inline]
+    fn set_to_x(&mut self, val: T) {
+        self[1].x = val;
+    }
+    #[inline]
+    fn set_from_x(&mut self, val: T) {
+        self[0].x = val;
+    }
+    #[inline]
+    fn set_to_y(&mut self, val: T) {
+        self[1].y = val;
+    }
+    #[inline]
+    fn set_from_y(&mut self, val: T) {
+        self[0].y = val;
+    }
+    #[inline]
+    fn from_x1_y1_x2_y2(x1: T, y1: T, x2: T, y2: T) -> Self {
+        [euclid::point2(x1, y1), euclid::point2(x2, y2)]
     }
 }
 
@@ -404,6 +473,22 @@ impl Line<f32> for LineSegment2F {
     #[inline]
     fn from_y(&self) -> f32 {
         LineSegment2F::from_y(*self)
+    }
+    #[inline]
+    fn set_to_x(&mut self, val: f32) {
+        LineSegment2F::set_to_x(self, val);
+    }
+    #[inline]
+    fn set_from_x(&mut self, val: f32) {
+        LineSegment2F::set_from_x(self, val);
+    }
+    #[inline]
+    fn set_to_y(&mut self, val: f32) {
+        LineSegment2F::set_to_y(self, val);
+    }
+    #[inline]
+    fn set_from_y(&mut self, val: f32) {
+        LineSegment2F::set_from_y(self, val);
     }
     #[inline]
     fn from_x1_y1_x2_y2(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
@@ -427,6 +512,22 @@ impl<T: Copy> Line<T> for ((T, T), (T, T)) {
     #[inline]
     fn from_y(&self) -> T {
         (self.0).1
+    }
+    #[inline]
+    fn set_to_x(&mut self, val: T) {
+        (self.1).0 = val;
+    }
+    #[inline]
+    fn set_from_x(&mut self, val: T) {
+        (self.0).0 = val;
+    }
+    #[inline]
+    fn set_to_y(&mut self, val: T) {
+        (self.1).1 = val;
+    }
+    #[inline]
+    fn set_from_y(&mut self, val: T) {
+        (self.0).1 = val;
     }
     #[inline]
     fn from_x1_y1_x2_y2(x1: T, y1: T, x2: T, y2: T) -> Self {

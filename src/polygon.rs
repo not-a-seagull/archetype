@@ -82,6 +82,16 @@ impl From<LineSegment2F> for PolygonEdge {
     }
 }
 
+impl<Dim> From<[euclid::Point2D<f32, Dim>; 2]> for PolygonEdge {
+    #[inline]
+    fn from(pts: [euclid::Point2D<f32, Dim>; 2]) -> Self {
+        Self::Straight(LineSegment2F::new(
+            pts.to::<Vector2F>(),
+            pts.from::<Vector2F>(),
+        ))
+    }
+}
+
 impl From<BezierCurve> for PolygonEdge {
     #[inline]
     fn from(bz: BezierCurve) -> PolygonEdge {
@@ -104,7 +114,7 @@ pub struct Polygon {
 
 impl Polygon {
     #[inline]
-    fn new<PE, I: IntoIterator<Item = PE>>(iter: I, mode: PolygonType) -> Self
+    pub fn new<PE, I: IntoIterator<Item = PE>>(iter: I, mode: PolygonType) -> Self
     where
         PE: Into<PolygonEdge>,
     {
