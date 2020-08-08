@@ -6,6 +6,7 @@ mod operations;
 use data::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},
@@ -17,7 +18,7 @@ pub use data::*;
 #[derive(Serialize, Deserialize)]
 pub struct GraphicalState {
     curves: HashMap<DataID, Curve>,
-    buffered_lines: HashMap<DataID, BufferedLine>,
+    buffered_lines: SmallVec<[BufferedLine; 12]>,
     lines: HashMap<DataID, StateLine>,
     polygons: HashMap<DataID, Polyshape>,
     filled_polygons: HashMap<DataID, Polyshape>,
@@ -33,7 +34,7 @@ impl GraphicalState {
     pub fn new() -> Self {
         Self {
             curves: HashMap::new(),
-            buffered_lines: HashMap::new(),
+            buffered_lines: SmallVec::new(),
             lines: HashMap::new(),
             polygons: HashMap::new(),
             filled_polygons: HashMap::new(),
@@ -75,16 +76,6 @@ impl GraphicalState {
     }
 
     #[inline]
-    pub fn buffered_lines(&self) -> &HashMap<DataID, BufferedLine> {
-        &self.buffered_lines
-    }
-
-    #[inline]
-    pub fn buffered_lines_mut(&mut self) -> &mut HashMap<DataID, BufferedLine> {
-        &mut self.buffered_lines
-    }
-
-    #[inline]
     pub fn history(&self) -> &[StateOperation] {
         &self.history
     }
@@ -122,6 +113,14 @@ impl GraphicalState {
     /// Get the next iteration of the data ID.
     pub fn next_data_id(&self) -> DataID {
         self.next_data_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Generate a set number of data ID's.
+    pub fn next_data_ids(&self, count: usize) -> SmallVec<[DataID; 10]> {
+        (0..count)
+            .into_iter()
+            .map(|_i| self.next_data_id())
+            .collect()
     }
 
     /// Get the current iteration of the Data ID.

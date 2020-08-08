@@ -75,6 +75,7 @@ impl BezierCurve {
             t1.cmp(&t2)
         });*/
 
+        println!("Fitting points: {:?}", &points);
         fit::fit_curve(&points, error).unwrap()
     }
 

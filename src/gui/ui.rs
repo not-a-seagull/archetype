@@ -3,8 +3,7 @@
 use super::{Gui, GuiMode};
 
 use gtk::{
-    prelude::*, Application, ApplicationWindow, Box as GtkBox, DrawingArea,
-    Inhibit, Orientation, 
+    prelude::*, Application, ApplicationWindow, Box as GtkBox, DrawingArea, Inhibit, Orientation,
 };
 use pathfinder_geometry::vector::Vector2F;
 

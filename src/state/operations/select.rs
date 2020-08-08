@@ -1,6 +1,6 @@
 // GPLv3 License
 
-use super::{GraphicalState, StateOperation, StateDataLoc, StateDataType};
+use super::{GraphicalState, StateDataLoc, StateDataType, StateOperation};
 use crate::Point;
 use euclid::default::Point2D;
 use itertools::Itertools;

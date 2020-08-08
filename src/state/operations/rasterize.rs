@@ -1,6 +1,6 @@
 // GPLv3 License
 
-use super::{StateLine, Curve, BufferedLine, GraphicalState, StateDataLoc, StateDataType};
+use super::{BufferedLine, Curve, GraphicalState, StateDataLoc, StateDataType, StateLine};
 use crate::{colors, Brush, DrawTarget, DynamicColor, Project, Rasterizable};
 use euclid::default::Point2D;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -97,7 +97,7 @@ impl GraphicalState {
         });
 
         // also rasterize the line buffer
-        self.buffered_lines.par_iter().for_each(|(i, pts)| {
+        self.buffered_lines.par_iter().for_each(|pts| {
             const BUFFERED_BRUSH: Brush = Brush::new_const(DynamicColor::Solid(colors::RED), 3);
 
             let line = match pts {

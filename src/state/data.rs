@@ -14,7 +14,6 @@ pub type DataID = usize;
 pub enum StateDataType {
     Curve,
     Line,
-    BufferedLine,
     Polygon,
 }
 
@@ -24,7 +23,6 @@ impl StateDataType {
         match self {
             Self::Curve => state.curves(),
             Self::Line => state.lines(),
-            Self::BufferedLine => state.buffered_lines(),
             Self::Polygon => state.polygons(),
         }
     }
@@ -34,7 +32,6 @@ impl StateDataType {
         match self {
             Self::Curve => state.curves_mut(),
             Self::Line => state.lines_mut(),
-            Self::BufferedLine => state.buffered_lines_mut(),
             Self::Polygon => state.polygons_mut(),
         }
     }
@@ -137,28 +134,6 @@ impl DataObject for StateLine {
     }
 }
 
-impl DataObject for BufferedLine {
-    #[inline]
-    fn data_type(&self) -> StateDataType {
-        StateDataType::BufferedLine
-    }
-
-    #[inline]
-    fn points(&self) -> SmallVec<[Vector2F; 4]> {
-        unimplemented!()
-    }
-
-    #[inline]
-    fn into_container(self) -> DataObjectContainer {
-        DataObjectContainer::BufferedLine(self)
-    }
-
-    #[inline]
-    fn clone_into_container(&self) -> DataObjectContainer {
-        self.clone().into_container()
-    }
-}
-
 impl DataObject for Curve {
     #[inline]
     fn data_type(&self) -> StateDataType {
@@ -214,7 +189,6 @@ impl DataObject for Polyshape {
 pub enum DataObjectContainer {
     Curve(Curve),
     StateLine(StateLine),
-    BufferedLine(BufferedLine),
     Polyshape(Polyshape),
 }
 
@@ -224,7 +198,6 @@ impl DataObjectContainer {
         match self {
             Self::Curve(c) => Box::new(c),
             Self::StateLine(s) => Box::new(s),
-            Self::BufferedLine(bl) => Box::new(bl),
             Self::Polyshape(p) => Box::new(p),
         }
     }
@@ -234,7 +207,6 @@ impl DataObjectContainer {
         match self {
             Self::Curve(ref c) => c as _,
             Self::StateLine(ref s) => s as _,
-            Self::BufferedLine(ref bl) => bl as _,
             Self::Polyshape(ref p) => p as _,
         }
     }
@@ -299,13 +271,17 @@ impl<T: DataObject + 'static> DataObjectCollection for HashMap<usize, T> {
 
     #[inline]
     fn remove(&mut self, index: DataID) -> DataObjectContainer {
-        self.remove(&index).expect("Data did not exist").into_container()
+        self.remove(&index)
+            .expect("Data did not exist")
+            .into_container()
     }
 
     #[inline]
     fn insert(&mut self, index: DataID, item: DataObjectContainer) {
         match item.into_boxed_any().downcast::<T>() {
-            Ok(b) => { self.insert(index, *b); },
+            Ok(b) => {
+                self.insert(index, *b);
+            }
             _ => panic!("Attempted to insert invalid object into data object collection"),
         }
     }
