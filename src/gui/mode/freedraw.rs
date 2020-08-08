@@ -2,7 +2,6 @@
 
 use super::GuiMode;
 use crate::Gui;
-use cairo::Context;
 use pathfinder_geometry::vector::Vector2F;
 use std::collections::HashSet;
 

@@ -2,8 +2,8 @@
 
 use super::GuiMode;
 use crate::Gui;
-use euclid::default::Point2D;
 use pathfinder_geometry::vector::Vector2F;
+use std::mem;
 
 enum SelectionMode {
     NoSelection,
@@ -46,6 +46,15 @@ impl GuiMode for SelectGuiMode {
             'd' => {
                 self.mode = SelectionMode::NoSelection;
                 gui.project().write().current_frame_mut().delete_selected();
+                gui.update_image();
+            }
+            'p' => {
+                self.mode = SelectionMode::NoSelection;
+                let mut pr = gui.project().write();
+                let brush = pr.current_brush_index();
+                pr.current_frame_mut()
+                    .polygonify_selected_items(brush, false, false);
+                mem::drop(pr);
                 gui.update_image();
             }
             _ => (),

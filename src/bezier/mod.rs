@@ -1,13 +1,10 @@
 // GPL v3.0
 
-use super::{Brush, DrawTarget, IntersectsAt, Line, Point, Rasterizable};
-use ordered_float::NotNan;
-use parking_lot::RwLock;
+use super::{Brush, DrawTarget, Point, Rasterizable};
 use pathfinder_geometry::{line_segment::LineSegment2F, vector::Vector2F};
-use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
-use std::{convert::TryInto, mem, ops::Range};
+use std::{mem, ops::Range};
 
 mod fit;
 
@@ -130,11 +127,8 @@ impl BezierCurve {
 
 impl Rasterizable for BezierCurve {
     #[inline]
-    fn rasterize(&self, target: &DrawTarget, brush: Brush) {
-        self.edges()
-            .collect::<Vec<LineSegment2F>>()
-            .iter()
-            .for_each(|l| l.rasterize(target, brush))
+    fn rasterize(&self, target: &DrawTarget, brush: &Brush) {
+        self.edges().for_each(|l| l.rasterize(target, brush))
     }
 }
 

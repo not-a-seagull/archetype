@@ -6,7 +6,7 @@ pub use solid::*;
 use image::{Primitive, Rgba};
 use num_traits::{AsPrimitive, Bounded};
 use ordered_float::NotNan;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 /// Information about the current coordinates.
 #[derive(Copy, Clone)]

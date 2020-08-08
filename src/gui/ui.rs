@@ -1,15 +1,12 @@
 // GPL v3.0
 
 use super::{Gui, GuiMode};
-use euclid::point2;
-use gtk::{
-    prelude::*, subclass::prelude::*, Align, Application, ApplicationWindow, Box as GtkBox,
-    DrawingArea, DrawingAreaBuilder, Fixed, Image as GtkImage, Inhibit, Orientation, Widget,
-};
-use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use pathfinder_geometry::vector::Vector2F;
 
-use std::mem;
+use gtk::{
+    prelude::*, Application, ApplicationWindow, Box as GtkBox, DrawingArea,
+    Inhibit, Orientation, 
+};
+use pathfinder_geometry::vector::Vector2F;
 
 pub fn build_ui(application: &Application, gui: Gui) {
     let window = ApplicationWindow::new(application);

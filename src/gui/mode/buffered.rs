@@ -7,7 +7,7 @@ use euclid::default::Point2D;
 use pathfinder_geometry::vector::Vector2F;
 use std::mem;
 
-pub const DEFAULT_ERROR: f32 = 12.0;
+pub const DEFAULT_ERROR: f32 = 1.0;
 
 /// Use the buffered lines.
 pub struct BufferedGuiMode {
@@ -66,11 +66,11 @@ impl GuiMode for BufferedGuiMode {
                 gui.update_image();
             }
             't' => {
-                self.error += 1.0;
+                self.error += 0.1;
                 println!("Error is {}", self.error);
             }
             'r' => {
-                self.error -= 1.0;
+                self.error -= 0.1;
                 if self.error < 0.0f32 {
                     self.error = 0.1f32;
                 }

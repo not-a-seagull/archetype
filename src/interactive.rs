@@ -1,6 +1,6 @@
 // MIT License
 
-use super::{Color, DynamicColor, SolidColor};
+use super::{DynamicColor, SolidColor};
 use smallvec::SmallVec;
 use std::io::{self, prelude::*};
 
@@ -41,7 +41,7 @@ pub fn interactive_color(color_name: &str) -> DynamicColor {
 
     let mut res = String::new();
 
-    'clr: loop {
+    loop {
         stdout
             .write_fmt(format_args!("Enter hex code for {}", color_name))
             .unwrap();
@@ -66,7 +66,7 @@ pub fn interactive_color(color_name: &str) -> DynamicColor {
                 }};
             }
 
-            return unsafe { SolidColor::new_unchecked(u8tof!(r), u8tof!(g), u8tof!(b)) }.into();
+            break unsafe { SolidColor::new_unchecked(u8tof!(r), u8tof!(g), u8tof!(b)) }.into();
         }
     }
 }

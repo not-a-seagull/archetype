@@ -1,7 +1,7 @@
 // GPLv3 License
 
 use euclid::{Point2D, Rect};
-use num_traits::{AsPrimitive, Float, Num, Pow, Signed, Zero};
+use num_traits::{AsPrimitive, Float, Num, Pow, Zero};
 use pathfinder_geometry::{
     line_segment::LineSegment2F,
     vector::{Vector2F, Vector2I},

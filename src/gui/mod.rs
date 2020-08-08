@@ -7,7 +7,7 @@ use super::{
 use cairo::{Context, Format, ImageSurface};
 use gio::{prelude::*, ApplicationFlags};
 use gtk::{prelude::*, Application, ApplicationWindow, DrawingArea};
-use image::{Rgba, RgbaImage};
+use image::Rgba;
 use once_cell::sync::OnceCell;
 use parking_lot::{Mutex, MutexGuard, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use rayon::prelude::*;

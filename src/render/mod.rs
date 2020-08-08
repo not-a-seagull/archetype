@@ -1,7 +1,7 @@
 // MIT License
 
-use super::{Color, DrawTarget, DynamicColor, Project, TCImage};
-use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+use super::{DynamicColor, Project, TCImage};
+use image::{DynamicImage, ImageFormat, Rgba};
 use parking_lot::RwLock;
 
 #[derive(Copy, Clone)]

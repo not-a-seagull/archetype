@@ -42,6 +42,11 @@ impl Brush {
     }
 
     #[inline]
+    pub fn set_color(&mut self, clr: DynamicColor) {
+        self.color = clr;
+    }
+
+    #[inline]
     pub fn width(&self) -> u32 {
         self.width
     }

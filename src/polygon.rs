@@ -1,19 +1,14 @@
 // GPLv3 License
 
 use super::{
-    rasterize_thick_line, rasterize_thin_line, BezierCurve, Brush, DrawTarget, IntersectsAt, Line,
-    Point, Rasterizable,
+    rasterize_thin_line, BezierCurve, Brush, DrawTarget, IntersectsAt, Line, Point, Rasterizable,
 };
 use euclid::default::Point2D;
-use image::{Rgba, RgbaImage};
-use itertools::Itertools;
 use ordered_float::NotNan;
-use parking_lot::RwLock;
 use pathfinder_geometry::{line_segment::LineSegment2F, vector::Vector2F};
 use rayon::{iter, prelude::*};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
-use std::{cmp::Ordering, collections::HashMap};
 
 /// Serializable form of polygon edge.
 #[derive(Deserialize, Serialize)]
@@ -152,7 +147,7 @@ impl Polygon {
     }
 
     #[inline]
-    fn fill(&self, target: &DrawTarget, brush: Brush) {
+    fn fill(&self, target: &DrawTarget, brush: &Brush) {
         // primitive home-brewed scanline algorithm
         // first, figure out the bounds of the polygon. min/max x/y
         // map into euclid points so that we can parallelize it
@@ -204,11 +199,7 @@ impl Polygon {
                 .for_each(|(pt1, pt2)| {
                     let pt1: Point2D<f32> = pt1; // this makes the compiler happy
 
-                    rasterize_thin_line(
-                        target,
-                        &(pt1.into_tuple(), pt2.into_tuple()),
-                        brush.clone(),
-                    );
+                    rasterize_thin_line(target, &(pt1.into_tuple(), pt2.into_tuple()), brush);
                 });
         });
     }
@@ -216,11 +207,11 @@ impl Polygon {
 
 impl Rasterizable for Polygon {
     #[inline]
-    fn rasterize(&self, target: &DrawTarget, brush: Brush) {
+    fn rasterize(&self, target: &DrawTarget, brush: &Brush) {
         match self.mode {
             PolygonType::Outline => {
                 self.as_straight_edges()
-                    .for_each(|l| l.rasterize(target, brush.clone()));
+                    .for_each(|l| l.rasterize(target, brush));
             }
             PolygonType::Fill => {
                 self.fill(target, brush);

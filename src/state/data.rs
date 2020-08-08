@@ -1,16 +1,14 @@
 // GPLv3 License
 
 use super::GraphicalState as State;
-use crate::{BezierCurve, Brush, Line, Polygon};
+use crate::{BezierCurve, Line, Polygon};
 use euclid::default::Point2D;
 use pathfinder_geometry::vector::Vector2F;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::{
-    any::{Any, TypeId},
-    boxed::Box,
-    iter,
-};
+use std::{any::Any, boxed::Box, collections::HashMap};
+
+pub type DataID = usize;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
 pub enum StateDataType {
@@ -43,7 +41,7 @@ impl StateDataType {
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
-pub struct StateDataLoc(pub StateDataType, pub usize);
+pub struct StateDataLoc(pub StateDataType, pub DataID);
 
 impl StateDataLoc {
     #[inline]
@@ -230,6 +228,38 @@ impl DataObjectContainer {
             Self::Polyshape(p) => Box::new(p),
         }
     }
+
+    #[inline]
+    pub fn as_data_object_ref(&self) -> &(dyn DataObject + 'static) {
+        match self {
+            Self::Curve(ref c) => c as _,
+            Self::StateLine(ref s) => s as _,
+            Self::BufferedLine(ref bl) => bl as _,
+            Self::Polyshape(ref p) => p as _,
+        }
+    }
+}
+
+impl DataObject for DataObjectContainer {
+    #[inline]
+    fn data_type(&self) -> StateDataType {
+        self.as_data_object_ref().data_type()
+    }
+
+    #[inline]
+    fn points(&self) -> SmallVec<[Vector2F; 4]> {
+        self.as_data_object_ref().points()
+    }
+
+    #[inline]
+    fn into_container(self) -> Self {
+        self
+    }
+
+    #[inline]
+    fn clone_into_container(&self) -> DataObjectContainer {
+        self.clone()
+    }
 }
 
 /// A collection of selectable data objects.
@@ -238,44 +268,44 @@ pub trait DataObjectCollection {
     fn kind(&self) -> StateDataType {
         self.data_at(0).unwrap().data_type()
     }
-    fn data_at(&self, index: usize) -> Option<&dyn DataObject>;
-    fn data_at_mut(&mut self, index: usize) -> Option<&mut dyn DataObject>;
+    fn data_at(&self, index: DataID) -> Option<&dyn DataObject>;
+    fn data_at_mut(&mut self, index: DataID) -> Option<&mut dyn DataObject>;
     fn length(&self) -> usize;
-    fn remove(&mut self, index: usize) -> DataObjectContainer;
-    fn insert(&mut self, index: usize, item: DataObjectContainer);
+    fn remove(&mut self, index: DataID) -> DataObjectContainer;
+    fn insert(&mut self, index: DataID, item: DataObjectContainer);
 }
 
-impl<T: DataObject + 'static> DataObjectCollection for Vec<T> {
+impl<T: DataObject + 'static> DataObjectCollection for HashMap<usize, T> {
     #[inline]
     fn length(&self) -> usize {
         self.len()
     }
 
     #[inline]
-    fn data_at(&self, index: usize) -> Option<&dyn DataObject> {
-        match self.get(index) {
+    fn data_at(&self, index: DataID) -> Option<&dyn DataObject> {
+        match self.get(&index) {
             Some(r) => Some(r),
             None => None,
         }
     }
 
     #[inline]
-    fn data_at_mut(&mut self, index: usize) -> Option<&mut dyn DataObject> {
-        match self.get_mut(index) {
+    fn data_at_mut(&mut self, index: DataID) -> Option<&mut dyn DataObject> {
+        match self.get_mut(&index) {
             Some(r) => Some(r),
             None => None,
         }
     }
 
     #[inline]
-    fn remove(&mut self, index: usize) -> DataObjectContainer {
-        self.remove(index).into_container()
+    fn remove(&mut self, index: DataID) -> DataObjectContainer {
+        self.remove(&index).expect("Data did not exist").into_container()
     }
 
     #[inline]
-    fn insert(&mut self, index: usize, item: DataObjectContainer) {
+    fn insert(&mut self, index: DataID, item: DataObjectContainer) {
         match item.into_boxed_any().downcast::<T>() {
-            Ok(b) => self.insert(index, *b),
+            Ok(b) => { self.insert(index, *b); },
             _ => panic!("Attempted to insert invalid object into data object collection"),
         }
     }

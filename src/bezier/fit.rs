@@ -1,7 +1,6 @@
 //! Adapted from https://github.com/Logicalshift/flo_curves/blob/master/src/bezier/fit.rs
 
 use super::{de_casteljau2, de_casteljau3, BezierCurve};
-use crate::Point;
 use pathfinder_geometry::vector::Vector2F;
 use rayon::prelude::*;
 
@@ -183,7 +182,7 @@ fn generate_bezier(
 ) -> BezierCurve {
     // Precompute the RHS as 'a'
     let a: Vec<_> = chords
-        .iter()
+        .par_iter()
         .map(|chord| {
             let inverse_chord = 1.0 - chord;
 

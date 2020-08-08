@@ -1,11 +1,8 @@
 // GPLv3 License
 
-use super::{Gui, Project};
+use super::Gui;
 use cairo::Context;
-use euclid::default::Point2D;
-use parking_lot::{Mutex, RwLock};
 use pathfinder_geometry::vector::Vector2F;
-use std::mem;
 
 mod buffered;
 pub use buffered::{BufferedGuiMode, DEFAULT_ERROR};
